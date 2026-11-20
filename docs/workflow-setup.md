@@ -60,3 +60,24 @@ Use a stable incident key (source, service, error signature, environment), bound
 ## Verification record
 
 Add dated links to real CI runs, PRs, screenshots and alert-created issues as they occur. Until an item has such evidence, treat it as planned or configured, not proven.
+
+## Verified baseline and approval policy (2026-11-20)
+
+- GitHub Copilot was assigned [Issue #2](https://github.com/benburleson/one-killer-party/issues/2), created [PR #3](https://github.com/benburleson/one-killer-party/pull/3) on its own branch, and the PR was merged by a human.
+- [CI run #6](https://github.com/benburleson/one-killer-party/actions/runs/44832837014) passed both **Lint, TypeScript, build** and **Playwright landing-page smoke test**; a `playwright-evidence` artifact was published.
+- Vercel preview deployment succeeded and its URL was opened by the human.
+- The repository owner reports that the `main` ruleset is configured.
+- During trial 1, GitHub asked the owner to approve an agent-originated workflow run. The owner subsequently disabled Copilot **Require approval for workflow runs** in repository settings.
+- **Not yet proven:** whether agent-generated workflow changes now run without an approval prompt. Trial 2 will measure that directly.
+
+### Running CI without intermediate human approval
+
+The intended policy is **unattended CI but attended merge**. Disabling Copilot workflow-run approval permits agent-authored workflow steps to execute; it does *not* mean PR content is trusted. Review the threat model and keep:
+
+1. PR workflow token permissions at `contents: read` unless an exception is explicitly reviewed.
+2. Production secrets and deployment credentials unavailable to untrusted PR jobs.
+3. No use of `pull_request_target` to check out and execute untrusted PR code with privileged tokens.
+4. Protected `main`, human merge decision, and no agent auto-merge authority.
+5. Future security or permissions modifications subject to separate human approval before merge.
+
+If a later trial reveals another approval gate, record which GitHub setting or workflow triggered it before changing security policy.
