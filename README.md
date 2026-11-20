@@ -1,95 +1,108 @@
 # One Killer Party
 
-An interactive murder-mystery party application **and a public experiment in AI-assisted software engineering**.
+**A murder-mystery party in your pocket — and a public experiment in autonomous, human-supervised software delivery.**
 
-This project has two goals:
-1. Build a theatrical, multiplayer mystery experience.
-2. Demonstrate a development lifecycle in which GitHub issues become autonomous coding tasks, agents work in isolated environments, and humans review evidence-backed pull requests before merging.
+One Killer Party is an in-person, phone-assisted murder-mystery experience. Guests interact face-to-face while the app handles game guidance, private information, clues and pacing. Alongside the product, this repository showcases an AI-assisted engineering lifecycle: **GitHub issue → coding agent → isolated branch → automated tests and evidence → PR ready for human review → human-controlled merge**.
 
-The engineering workflow is part of the product showcase, not just an implementation detail. Changes, experiments, limitations, and lessons learned are intended to be visible through public issues, pull requests, and documentation.
+## What we're building
 
-## The development loop
+The initial playable mystery is **The Blackwood Affair**. Product behavior is specified in the version-controlled [product specification](docs/product/product-vision.md), including:
+
+- [Vision and scope](docs/product/product-vision.md)
+- [Game rules and state](docs/product/gameplay-specification.md)
+- [Host and player journeys](docs/product/host-and-player-flows.md)
+- [Reusable mystery content model](docs/product/mystery-content-model.md)
+- [The Blackwood Affair](docs/product/blackwood-affair.md)
+- [Decision register and open questions](docs/product/decisions-and-open-questions.md)
+
+The v0.3 documents are an **implementation baseline**, not a claim that all gameplay details are finalized. They label confirmed decisions, proposals and unresolved questions; implementation issues must reference the relevant requirements rather than inventing missing rules.
+
+## Development lifecycle
 
 ```text
-Human issue / monitoring alert
-           |
-           v
-Normalize, prioritize, deduplicate (monitoring automation: planned)
-           |
-           v
-GitHub issue -> approved agent assignment
-           |
-           v
-Isolated agent workspace + issue branch
-           |
-           v
-Implement -> test -> debug -> repeat
-           |
-           v
-Draft PR + CI + screenshots + Vercel preview
-           |
-           v
-Human review and manual merge decision
+Product specification / GitHub issue
+                |
+                v
+      Copilot coding agent
+       isolated issue branch
+                |
+                v
+       Implement and test
+                |
+                v
+    PR + CI + Playwright evidence
+                |
+                v
+       Vercel PR preview
+                |
+                v
+    Ready for human review
+                |
+                v
+     Human-controlled merge
 ```
 
-**No automatic merge to `main`.** The desired autonomy is in investigation, implementation, test iteration, and reviewer handoff—not bypassing human approval.
+**No automatic merge to `main`.** GitHub rules protect the default branch; agent-generated code and tests are proposals, not approvals.
 
-## Current state
+### Demonstrated and configured status (November 20, 2026)
 
-This is an evolving experiment. A checked-in configuration is **not** evidence that the entire workflow has run successfully.
-
-| Capability | Status |
+| Capability | Status / evidence |
 | --- | --- |
-| Next.js app, GitHub, Vercel, Supabase initial setup | Established during initial project setup |
-| CI workflow for lint, TypeScript and build | Configured in setup PR; verify checks before merging |
-| Agent instructions and issue / PR templates | Configured in setup PR |
-| VS Code / Codespaces dev container definition | Configured in setup PR; runtime not yet validated |
-| Copilot issue assignment and autonomous PR | To be enabled and proven with first trial |
-| Playwright screenshots / traces in PR | Configured; verify the browser-smoke job and artifacts on a PR |
-| Automated Vercel PR preview verification | Planned |
-| Isolated Supabase integration test resources | Planned |
-| Vercel / Supabase alerts to deduplicated issues | Planned |
+| Public repository and protected `main` | Public confirmed; branch ruleset reported configured by owner |
+| Copilot coding agent from GitHub issue | **Demonstrated:** [Issue #2](https://github.com/benburleson/one-killer-party/issues/2) → [PR #3](https://github.com/benburleson/one-killer-party/pull/3) |
+| CI: lint, TypeScript and build | **Demonstrated:** [successful run](https://github.com/benburleson/one-killer-party/actions/runs/44832837014) |
+| Playwright desktop/mobile and evidence artifacts | **Demonstrated:** [trial 2 PR #6](https://github.com/benburleson/one-killer-party/pull/6) and its linked CI/artifacts |
+| Vercel PR preview deployments | **Demonstrated:** successful preview status and browser access during agent trials |
+| Workflow approvals | **Owner-configured:** Copilot workflow-run approval disabled; trial 2 ran without the earlier approval interruption |
+| Automatic draft → Ready for Review | **Configured:** [promotion workflow](.github/workflows/promote-agent-pr.yml); live end-to-end validation still required |
+| Product specification v0.3 | **Version controlled:** [docs/product/](docs/product/) |
+| Dev container | **Configured; preferred setup**, not yet independently validated after this update |
+| Copilot cloud-agent setup steps | **Configured in this change**; requires merge and subsequent agent-run verification |
+| Isolated Supabase integration-test data | Planned |
+| Vercel/Supabase alerts → deduplicated GitHub issues | Planned |
 
-## Workflow documentation
+We deliberately record manual interventions, failed runs, and limits alongside successes; see [agent evaluation](docs/agent-evaluation.md).
 
-- [Architecture and autonomy boundaries](docs/agent-development-lifecycle.md)
-- [Environment and GitHub setup runbook](docs/workflow-setup.md)
-- [Agent-run evidence and showcase metrics](docs/agent-evaluation.md)
-- [Agent working instructions](.github/copilot-instructions.md)
+## Development environment — dev container first
 
-## Local development
+**Preferred:** use the repo's [dev container](.devcontainer/devcontainer.json), with Node.js 22, npm dependencies, and Chromium for Playwright. This works in VS Code + Docker and compatible GitHub Codespaces environments.
 
-Requires Node.js 22 and npm.
+1. Install Docker and the VS Code **Dev Containers** extension, or use GitHub Codespaces.
+2. Clone the repository and open it in VS Code.
+3. Select **Dev Containers: Reopen in Container** from the Command Palette. Setup runs `npm ci` and installs Playwright Chromium/dependencies.
+4. Start the app inside the container:
 
 ```bash
-npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. Secrets belong in local, uncommitted environment files (refer to existing environment configuration); never publish production credentials or personal player data.
+Open the forwarded port **3000**. Keep any local `.env.local` or other secrets uncommitted. The container does not automatically provision a Supabase database or production credentials.
 
-You can alternatively open this repository in a compatible VS Code development container using `.devcontainer/devcontainer.json`.
-
-## Browser smoke test
-
-Run the desktop (1280 × 720) and emulated mobile (390 × 844) landing-page smoke tests against the production build with headless Chromium:
+### Verify locally
 
 ```bash
-npx playwright install chromium
+npm run lint
+npx tsc --noEmit
 npm run build
-npm run test:e2e
+npm run test:e2e -- --project=desktop-chromium --project=mobile-chromium
 ```
 
-On Linux, use `npx playwright install --with-deps chromium` if browser system dependencies are missing. Each project saves a full-page `landing-page.png` in its own `test-results/` directory, whose name includes `desktop-chromium` or `mobile-chromium`. On pull requests, open the Actions workflow run and download the `playwright-evidence` artifact to inspect both screenshots in `test-results/` and the HTML report in `playwright-report/`; failure traces are included when generated. Artifacts are retained for 14 days.
+Playwright tests use the production build (`npm run build` first). Screenshots and HTML reports appear under `test-results/` and `playwright-report/`. On PRs, download the `playwright-evidence` artifact from the GitHub Actions run (14-day retention).
 
-## Technologies
+**Fallback without a container:** install Node.js 22 and npm locally, run `npm ci`, then `npx playwright install --with-deps chromium` (Linux) or `npx playwright install chromium` (macOS). Run the same scripts above.
 
-Next.js, React, TypeScript, Tailwind CSS, Supabase, Playwright, GitHub Actions, Vercel.
+### Environment parity and limitations
 
-## Portfolio review guide
+The dev container is the **preferred interactive workspace**, not the automatic runtime of GitHub Copilot's cloud agent. When Copilot runs on GitHub Actions, [`copilot-setup-steps.yml`](.github/workflows/copilot-setup-steps.yml) prepares Node 22, dependencies and Chromium. CI independently verifies changes on Linux runners. All environments use the same package lockfile and npm scripts, but different host images can still behave differently.
 
-Start with the [development lifecycle](docs/agent-development-lifecycle.md), then inspect the GitHub **Issues**, **Pull requests**, and **Actions** tabs. The [agent evaluation rubric](docs/agent-evaluation.md) is designed to distinguish real, independently verifiable autonomy from claims about what an agent might do.
+For setup details and known limitations, see [development environments](docs/development-environments.md).
 
-## Security model
+## How to explore the showcase
 
-The repository is intentionally public. Public read access does not grant permission to push to protected branches. No secrets, personal data, or production database credentials belong in repository files, issue bodies, PR comments, screenshots, or CI artifacts. Production-impacting changes and merging remain human-controlled.
+Start with [the lifecycle](docs/agent-development-lifecycle.md) and [environment setup](docs/workflow-setup.md); inspect public [issues](https://github.com/benburleson/one-killer-party/issues), [pull requests](https://github.com/benburleson/one-killer-party/pulls), and [Actions runs](https://github.com/benburleson/one-killer-party/actions). See the [evaluation rubric](docs/agent-evaluation.md) for measured autonomy and the [draft promotion policy](docs/pr-auto-promotion.md).
+
+## Stack and safety
+
+Next.js (App Router), React, TypeScript, Tailwind CSS, Supabase, Playwright, GitHub Actions, Vercel.
+
+This repository is intentionally public. Never publish tokens, secrets, private player information or real production data in source, issues, artifacts or logs. Agent work uses isolated branches; production changes and merges require human authorization.
