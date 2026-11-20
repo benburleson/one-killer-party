@@ -72,7 +72,7 @@ You can alternatively open this repository in a compatible VS Code development c
 
 ## Browser smoke test
 
-Run the landing-page smoke test against the production build with headless Chromium:
+Run the desktop (1280 × 720) and emulated mobile (390 × 844) landing-page smoke tests against the production build with headless Chromium:
 
 ```bash
 npx playwright install chromium
@@ -80,7 +80,7 @@ npm run build
 npm run test:e2e
 ```
 
-On Linux, use `npx playwright install --with-deps chromium` if browser system dependencies are missing. The test saves a desktop landing-page screenshot under `test-results/`. On pull requests, open the **Playwright landing-page smoke test** job in Actions and download the `playwright-evidence` artifact for the screenshot and HTML report; failure traces are included when generated. Artifacts are retained for 14 days.
+On Linux, use `npx playwright install --with-deps chromium` if browser system dependencies are missing. Each project saves a full-page `landing-page.png` in its own `test-results/` directory, whose name includes `desktop-chromium` or `mobile-chromium`. On pull requests, open the Actions workflow run and download the `playwright-evidence` artifact to inspect both screenshots in `test-results/` and the HTML report in `playwright-report/`; failure traces are included when generated. Artifacts are retained for 14 days.
 
 ## Technologies
 
