@@ -45,7 +45,7 @@ This is an evolving experiment. A checked-in configuration is **not** evidence t
 | Agent instructions and issue / PR templates | Configured in setup PR |
 | VS Code / Codespaces dev container definition | Configured in setup PR; runtime not yet validated |
 | Copilot issue assignment and autonomous PR | To be enabled and proven with first trial |
-| Playwright screenshots / traces in PR | Planned |
+| Playwright screenshots / traces in PR | Configured; verify the browser-smoke job and artifacts on a PR |
 | Automated Vercel PR preview verification | Planned |
 | Isolated Supabase integration test resources | Planned |
 | Vercel / Supabase alerts to deduplicated issues | Planned |
@@ -70,9 +70,21 @@ Open http://localhost:3000. Secrets belong in local, uncommitted environment fil
 
 You can alternatively open this repository in a compatible VS Code development container using `.devcontainer/devcontainer.json`.
 
+## Browser smoke test
+
+Run the landing-page smoke test against the production build with headless Chromium:
+
+```bash
+npx playwright install chromium
+npm run build
+npm run test:e2e
+```
+
+On Linux, use `npx playwright install --with-deps chromium` if browser system dependencies are missing. The test saves a desktop landing-page screenshot under `test-results/`. On pull requests, open the **Playwright landing-page smoke test** job in Actions and download the `playwright-evidence` artifact for the screenshot and HTML report; failure traces are included when generated. Artifacts are retained for 14 days.
+
 ## Technologies
 
-Next.js, React, TypeScript, Tailwind CSS, Supabase, GitHub Actions, Vercel. Playwright is planned for browser-based verification.
+Next.js, React, TypeScript, Tailwind CSS, Supabase, Playwright, GitHub Actions, Vercel.
 
 ## Portfolio review guide
 
