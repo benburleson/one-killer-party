@@ -37,7 +37,7 @@ jobs:
         run: npm run build
 
   browser-smoke:
-    name: Playwright landing-page smoke test
+    name: Playwright desktop and mobile smoke tests
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -55,8 +55,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Production build
         run: npm run build
-      - name: Run browser smoke test
-        run: npm run test:e2e
+      - name: Run desktop and mobile Chromium smoke tests
+        run: npm run test:e2e -- --project=desktop-chromium --project=mobile-chromium
       - name: Upload Playwright evidence
         if: always()
         uses: actions/upload-artifact@v4
