@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# One Killer Party
 
-## Getting Started
+An interactive murder-mystery party application **and a public experiment in AI-assisted software engineering**.
 
-First, run the development server:
+This project has two goals:
+1. Build a theatrical, multiplayer mystery experience.
+2. Demonstrate a development lifecycle in which GitHub issues become autonomous coding tasks, agents work in isolated environments, and humans review evidence-backed pull requests before merging.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+The engineering workflow is part of the product showcase, not just an implementation detail. Changes, experiments, limitations, and lessons learned are intended to be visible through public issues, pull requests, and documentation.
+
+## The development loop
+
+```text
+Human issue / monitoring alert
+           |
+           v
+Normalize, prioritize, deduplicate (monitoring automation: planned)
+           |
+           v
+GitHub issue -> approved agent assignment
+           |
+           v
+Isolated agent workspace + issue branch
+           |
+           v
+Implement -> test -> debug -> repeat
+           |
+           v
+Draft PR + CI + screenshots + Vercel preview
+           |
+           v
+Human review and manual merge decision
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**No automatic merge to `main`.** The desired autonomy is in investigation, implementation, test iteration, and reviewer handoff—not bypassing human approval.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Current state
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This is an evolving experiment. A checked-in configuration is **not** evidence that the entire workflow has run successfully.
 
-## Learn More
+| Capability | Status |
+| --- | --- |
+| Next.js app, GitHub, Vercel, Supabase initial setup | Established during initial project setup |
+| CI workflow for lint, TypeScript and build | Configured in setup PR; verify checks before merging |
+| Agent instructions and issue / PR templates | Configured in setup PR |
+| VS Code / Codespaces dev container definition | Configured in setup PR; runtime not yet validated |
+| Copilot issue assignment and autonomous PR | To be enabled and proven with first trial |
+| Playwright screenshots / traces in PR | Planned |
+| Automated Vercel PR preview verification | Planned |
+| Isolated Supabase integration test resources | Planned |
+| Vercel / Supabase alerts to deduplicated issues | Planned |
 
-To learn more about Next.js, take a look at the following resources:
+## Workflow documentation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- [Architecture and autonomy boundaries](docs/agent-development-lifecycle.md)
+- [Environment and GitHub setup runbook](docs/workflow-setup.md)
+- [Agent-run evidence and showcase metrics](docs/agent-evaluation.md)
+- [Agent working instructions](.github/copilot-instructions.md)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Local development
 
-## Deploy on Vercel
+Requires Node.js 22 and npm.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm ci
+npm run dev
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Open http://localhost:3000. Secrets belong in local, uncommitted environment files (refer to existing environment configuration); never publish production credentials or personal player data.
+
+You can alternatively open this repository in a compatible VS Code development container using `.devcontainer/devcontainer.json`.
+
+## Technologies
+
+Next.js, React, TypeScript, Tailwind CSS, Supabase, GitHub Actions, Vercel. Playwright is planned for browser-based verification.
+
+## Portfolio review guide
+
+Start with the [development lifecycle](docs/agent-development-lifecycle.md), then inspect the GitHub **Issues**, **Pull requests**, and **Actions** tabs. The [agent evaluation rubric](docs/agent-evaluation.md) is designed to distinguish real, independently verifiable autonomy from claims about what an agent might do.
+
+## Security model
+
+The repository is intentionally public. Public read access does not grant permission to push to protected branches. No secrets, personal data, or production database credentials belong in repository files, issue bodies, PR comments, screenshots, or CI artifacts. Production-impacting changes and merging remain human-controlled.
