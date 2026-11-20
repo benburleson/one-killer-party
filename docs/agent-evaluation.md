@@ -36,3 +36,25 @@ Report denominators and failed trials; do not calculate success percentages from
 ## Graduation criteria for more autonomy
 
 Advance from human-created issues to automated issue creation only after the agent can complete several scoped tasks with credible tests and evidence. Advance from human agent-dispatch to automatic dispatch only for pre-approved, low-risk issue categories with deduplication, rollback/stop mechanisms, and explicit limits on execution cost and privileges. **Never graduate to automatic merge as part of this experiment.**
+
+## Trial 1 — Issue #2: Playwright landing-page smoke test (2026-11-20)
+
+**Evidence:** [Issue #2](https://github.com/benburleson/one-killer-party/issues/2) · [Copilot PR #3](https://github.com/benburleson/one-killer-party/pull/3) · [CI run #6](https://github.com/benburleson/one-killer-party/actions/runs/44832837014)
+
+| Field | Observed |
+| --- | --- |
+| Trigger | Human-authored GitHub Issue #2, assigned to GitHub Copilot |
+| Execution | Copilot worked in a dedicated branch and opened PR #3 |
+| Delivery | Added Playwright landing-page test, Chromium CI job, screenshot/report artifacts, README commands |
+| Verification | GitHub Actions lint/type/build job passed; Playwright browser-smoke job passed |
+| Evidence | `playwright-evidence` artifact successfully uploaded; artifact image contents were not independently reviewed in this record |
+| Preview | Vercel reported successful preview deployment; human confirmed opening a preview URL in browser |
+| Human interventions | One manual approval of a Copilot-triggered workflow run, plus final human merge; issue creation and assignment also human-initiated |
+| Outcome | PR #3 merged by human on 2026-11-20 |
+| Open questions | Exact agent runtime reproducibility and complete absence of additional agent-internal retries have not been established |
+
+**Bottleneck and change:** GitHub required a human to approve the agent-originated workflow. After the trial, the repository owner disabled Copilot's **Require approval for workflow runs** setting. This is a *user-reported configuration change*, not yet independently validated by another agent-triggered run.
+
+**Trade-off:** New or changed agent-authored CI code can now execute without an individual workflow approval. Keep GitHub Actions permissions read-only by default, prevent PR access to production secrets, retain branch protection, and require human-controlled merging. Security-sensitive workflow changes should still receive careful human review before merge.
+
+**Trial 2 hypothesis:** A fresh agent issue that changes CI should result in tests and screenshot artifacts without an intermediate **Approve and run workflows** prompt. Record whether that actually happens; do not infer it from settings alone.
