@@ -1,0 +1,125 @@
+# Runs only from the trusted default branch after CI completes.
+# Does not check out or execute code from the pull request.
+name: Promote completed agent PR
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  promote:
+    name: Promote agent draft after verified CI
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify completion evidence and mark ready
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+            const skip = (reason) => { core.info("Not promoting: " + reason); };
+
+            // Only trust CI executed for branches in this repository.
+            if (run.head_repository?.id !== context.payload.repository.id) {
+              skip("CI originated outside this repository");
+              return;
+            }
+            if (!run.head_branch?.startsWith("copilot/")) {
+              skip("not a Copilot branch");
+              return;
+            }
+
+            // GitHub can omit pull_requests on workflow_run for some PRs.
+            const listed = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: "open", per_page: 100,
+            });
+            const candidates = listed.filter(pr =>
+              pr.draft &&
+              pr.base.ref === "main" &&
+              pr.head.repo?.id === context.payload.repository.id &&
+              pr.head.ref === run.head_branch
+            );
+            if (candidates.length !== 1) {
+              skip("expected exactly one open draft PR for the branch");
+              return;
+            }
+            const number = candidates[0].number;
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+
+            // A CI run against an older revision must never promote a new revision.
+            // PR runs can identify either the head SHA or the generated merge SHA.
+            const eligibleSha = [pr.head.sha, pr.merge_commit_sha].includes(run.head_sha);
+            if (!eligibleSha) {
+              skip("CI is stale relative to current PR revision");
+              return;
+            }
+            if (!pr.draft || pr.state !== "open") {
+              skip("PR is no longer an open draft");
+              return;
+            }
+            if (/^\s*(\[WIP\]|WIP\b|\[Draft\]|Draft\b)/i.test(pr.title)) {
+              skip("agent still identifies PR as work in progress");
+              return;
+            }
+
+            const body = pr.body || "";
+            const sections = [
+              "## Validation",
+              "## Screenshots and browser evidence",
+              "## Human verification steps",
+            ];
+            if (sections.some(section => !body.includes(section))) {
+              skip("PR description does not contain complete reviewer handoff");
+              return;
+            }
+            if (/\b(blocked|awaiting agent|work in progress)\b/i.test(pr.title)) {
+              skip("PR reports a blocker");
+              return;
+            }
+
+            // CI success must include actual uploaded browser evidence.
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner, repo, run_id: run.id, per_page: 100,
+            });
+            if (!artifacts.some(a =>
+              a.name === "playwright-evidence" &&
+              !a.expired &&
+              a.size_in_bytes > 0
+            )) {
+              skip("no nonempty Playwright evidence artifact on the passing CI run");
+              return;
+            }
+
+            // Re-fetch immediately before the state change to reduce the
+            // chance of promoting a draft modified during verification.
+            const { data: latest } = await github.rest.pulls.get({
+              owner, repo, pull_number: number,
+            });
+            if (!latest.draft ||
+                latest.head.sha !== pr.head.sha ||
+                latest.base.sha !== pr.base.sha ||
+                latest.title !== pr.title ||
+                latest.body !== pr.body) {
+              skip("PR changed during verification");
+              return;
+            }
+
+            const result = await github.graphql(
+              `mutation($id: ID!) {
+                 markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                   pullRequest { url isDraft }
+                 }
+               }`,
+              { id: latest.node_id }
+            );
+            core.notice("Promoted to ready for human review: " +
+              result.markPullRequestReadyForReview.pullRequest.url);
