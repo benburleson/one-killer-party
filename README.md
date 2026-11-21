@@ -44,24 +44,19 @@ Product specification / GitHub issue
 
 **No automatic merge to `main`.** GitHub rules protect the default branch; agent-generated code and tests are proposals, not approvals.
 
-### Demonstrated and configured status (November 20, 2026)
+## Current implementation
 
-| Capability | Status / evidence |
-| --- | --- |
-| Public repository and protected `main` | Public confirmed; branch ruleset reported configured by owner |
-| Copilot coding agent from GitHub issue | **Demonstrated:** [Issue #2](https://github.com/benburleson/one-killer-party/issues/2) → [PR #3](https://github.com/benburleson/one-killer-party/pull/3) |
-| CI: lint, TypeScript and build | **Demonstrated:** [successful run](https://github.com/benburleson/one-killer-party/actions/runs/44832837014) |
-| Playwright desktop/mobile and evidence artifacts | **Demonstrated:** [trial 2 PR #6](https://github.com/benburleson/one-killer-party/pull/6) and its linked CI/artifacts |
-| Vercel PR preview deployments | **Demonstrated:** successful preview status and browser access during agent trials |
-| Workflow approvals | **Owner-configured:** Copilot workflow-run approval disabled; trial 2 ran without the earlier approval interruption |
-| Automatic draft → Ready for Review | **Configured:** [promotion workflow](.github/workflows/promote-agent-pr.yml); live end-to-end validation still required |
-| Product specification v0.3 | **Version controlled:** [docs/product/](docs/product/) |
-| Dev container | **Configured; preferred setup**, not yet independently validated after this update |
-| Copilot cloud-agent setup steps | **Configured in this change**; requires merge and subsequent agent-run verification |
-| Isolated Supabase integration-test data | Planned |
-| Vercel/Supabase alerts → deduplicated GitHub issues | Planned |
+The host-facing flow supports Supabase email magic-link sign-in, creation of a Blackwood Affair lobby, a one-time displayed eight-character invitation code, and host-only party access. Guest joining and recovery, role assignments, private dossiers, game progression and realtime play are **not yet implemented**.
 
-We deliberately record manual interventions, failed runs, and limits alongside successes; see [agent evaluation](docs/agent-evaluation.md).
+- **Application:** https://app.onekillerparty.com (host page at `/host`)
+- **Marketing domain:** https://onekillerparty.com (also `www.onekillerparty.com`)
+- **Deployment:** Vercel; Supabase Auth and Postgres backing the live host flow
+- **Transactional email:** custom SMTP configured in hosted Supabase for authentication mail (owner-reported); see [production operations](docs/production-operations.md)
+- **Schema:** migrations `20261121030000` and `20261121040000` applied to the linked production Supabase project (owner-verified via CLI migration history)
+- **Local/CI integration:** disposable Supabase Docker stack; migration/RLS tests and local host-flow browser tests
+- **Delivery:** Copilot issue-to-PR development with required checks and human-reviewed merge
+
+For durable setup and security instructions, see [development environments](docs/development-environments.md), [lobby persistence](docs/architecture/lobby-persistence.md), [production operations](docs/production-operations.md), and [agent evaluation](docs/agent-evaluation.md). Past trials and incident diagnostics belong in GitHub PRs, CI runs and the evaluation log, not in this README.
 
 ## Development environment — dev container first
 
@@ -76,7 +71,7 @@ We deliberately record manual interventions, failed runs, and limits alongside s
 npm run dev
 ```
 
-Open the forwarded port **3000**. Keep any local `.env.local` or other secrets uncommitted. The container does not automatically provision a Supabase database or production credentials.
+Open forwarded port **3000**. Start the disposable local Supabase stack with `npx supabase start` when testing auth/database features; use a local-only, uncommitted `.env.local`. Never point automated tests at production.
 
 ### Verify locally
 

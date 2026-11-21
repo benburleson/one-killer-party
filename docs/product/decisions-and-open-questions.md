@@ -33,8 +33,8 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 | `D-013` | Guests may lie/bluff/conceal but must not alter authentic app-issued evidence | Repeated established rule |
 | `D-014` | Mac + VS Code + AI coding tools for development | Explicit user selection |
 | `D-015` | User owns a domain and prefers **marketing root + app subdomain** | Explicit user choice |
-| `D-016` | DNS for that domain was reported configured | User report; exact string/provider/verification not recorded |
-| `D-017` | The user reported all eight initial setup tasks completed (local Next.js, GitHub, Supabase dev, env vars, landing page, Vercel) | User report; integration functionality not independently tested here |
+| `D-016` | Domain strategy: `onekillerparty.com` for marketing and `app.onekillerparty.com` for application/host flow; owner confirmed app HTTPS and sign-in | Operational fact; see production operations |
+| `D-017` | Version-controlled Supabase migrations deployed to linked production project; Codespaces/local Supabase and app-host sign-in smoke tested by owner | Owner-reported operational validation; see production operations |
 | `D-018` | GitHub is to support an autonomous **issue → implementation → PR → review/merge** portfolio workflow, with spec in repo | User's explicit goal in this request and project context |
 | `D-019` | Keep this product spec as six version-controlled Markdown files under `docs/product/` | Explicit user request |
 | `D-020` | Host authentication uses **Supabase email magic links**. Redirects and email-delivery configuration must be environment-scoped. | Product owner selection, 2026-11-20; resolves `O-001`; implementation remains subject to security testing |
@@ -67,7 +67,7 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 | `P-015` | Detective score = 5 murderer + 3 motive + 2 method; murderer excluded | Provisional, not evaluated against mystery difficulty |
 | `P-016` | Murderer wins if no nonkiller identifies them; optional end awards | Outcomes not finalized |
 | `P-017` | Versioned content packages, server-only solution and a public/role/host projection model | Architecture direction; storage mechanism open |
-| `P-018` | Local + PR preview + production-facing web deployment, separate dev/prod Supabase projects | Only a Supabase **development** project was reported set up |
+| `P-018` | Local + PR preview + production-facing web deployment, isolated environments | Local/CI disposable Supabase and linked production project exist; dedicated preview isolation and backups remain open (O-025) |
 | `P-019` | Public root marketing site and `app.` gameplay subdomain | Structure preferred; separate deployments/codebases not required |
 | `P-020` | Content review, authorization tests and eight-person playtest before calling mystery ready | Quality gate proposed and strongly recommended |
 | `P-021` | Dark charcoal/gold/burgundy visual direction with optional Art Deco / 1920s aesthetic | Visual concept, no finalized brand system |
@@ -81,12 +81,9 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 
 Owner-approved decisions: `O-001` → `D-020` (host email magic links), `O-002` → `D-021` (guest identity with host-assisted recovery), `O-003` → `D-022` (optional playing host, eight Blackwood player slots), `O-006` → `D-023` (public assignment and pre-start private dossier; future-act material remains gated), `O-004` → `D-024` and `D-025` (shared invitation and capacity/names), and `O-005` → `D-025` (join/removal/reassignment policy). These supersede the corresponding awaiting-approval entries in the proposed ADR in PR #14. Invitation/capacity and lifecycle policies in `O-004` and `O-005` were subsequently approved as `D-024` and `D-025`; see above. Technical implementation must still be reviewed and tested.
 
-### Remaining blockers for lobby/auth implementation
+### Established infrastructure facts
 
-| ID | Question | Why it matters | Proposed default for discussion (NOT decided) |
-|---|---|---|---|
-| `O-007` | Is the app subdomain live via HTTPS and which production Supabase project, if any, backs it? | Deployment and secret scopes | Verify without changing DNS |
-| `O-008` | Exactly which existing GitHub workflows, branch protections and CI checks must a new PR satisfy? | Autonomous coding agents must follow established repo process | Inspect repository workflow/docs first |
+App authentication is served from `https://app.onekillerparty.com`; the owner confirmed a successful host magic-link sign-in after correcting a stale browser-tab origin. The production Supabase project has M1.3/M1.4 migrations applied and custom SMTP configured (owner-reported). GitHub CI/workflows and PR protections are version-controlled and documented. Operational details live in [production operations](../production-operations.md) rather than unresolved O-007/O-008 setup questions.
 
 ### Blockers for full mystery and state engine
 
@@ -111,9 +108,9 @@ Owner-approved decisions: `O-001` → `D-020` (host email magic links), `O-002` 
 
 | ID | Question | Why it matters | Proposed default for discussion (NOT decided) |
 |---|---|---|---|
-| `O-023` | Full owned domain name, DNS provider and future marketing site architecture? | Avoid disruptive DNS edits | Keep app subdomain and current Vercel project |
+| `O-023` | Final marketing site architecture and DNS/provider ownership controls? | Future DNS edits without disrupting working app | Keep `onekillerparty.com`/`www` for marketing and `app.onekillerparty.com` for app |
 | `O-024` | Does Vercel plan permit the intended noncommercial/commercial usage and what budget applies? | Hosting/license/expense | Confirm current plan before paid use |
-| `O-025` | Separate production Supabase, migration strategy, backups and failure recovery? | Real party reliability | Use separate dev/prod projects before public live play |
+| `O-025` | Production backup/restore, retention, preview data isolation and future migration approvals? | Real party reliability | Production migrations applied; keep local/CI disposable and agree backups, disaster recovery and preview separation before wider release |
 | `O-026` | Mystery package storage: server-only JSON, SQL normalized tables or hybrid? | Secret deployment, authoring, schema migration | Pick a server-authoritative storage plan in ADR |
 | `O-027` | What should be public in portfolio repo vs private story/brand/IP? | Show technical ability without leaking the killer or original story asset rights | Make explicit public-release/redaction decision |
 | `O-028` | Whether the wife/product co-creator has editorial approval over gameplay/story/branding? | Product ownership and expectations | Establish named content reviewer |
@@ -180,4 +177,4 @@ Owner-approved decisions: `O-001` → `D-020` (host email magic links), `O-002` 
 
 ## 9. Summary of what's *not* decided yet
 
-**Do not assume** the exact recovery-token mechanism or security parameters for invitation entropy/throttling, paid hosting tiers, production DB, exact root-domain name, handling missing voters, final scoring, fictional-time framing, complete cast objective matrix, forensic detail provenance, content storage design, public repo disclosure policy or commercial pricing have already been approved. Treat them as explicitly open until recorded otherwise.
+**Do not assume** the exact recovery-token mechanism or security parameters for invitation entropy/throttling, paid hosting tiers, production backup/preview isolation, handling missing voters, final scoring, fictional-time framing, complete cast objective matrix, forensic detail provenance, content storage design, public repo disclosure policy or commercial pricing have already been approved. Treat them as explicitly open until recorded otherwise.

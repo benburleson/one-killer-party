@@ -1,10 +1,6 @@
-# Lobby persistence and local database
+# Lobby persistence and host commands
 
-**Status: local lobby persistence and M1.4 host commands.**
-
-The local Supabase database is disposable and must contain only synthetic test
-data. These migrations are not permission to link, reset, or migrate any hosted
-Supabase project.
+The M1.3 and M1.4 migrations are version-controlled in `supabase/migrations/`. The owner verified they were applied to the hosted production Supabase project; all **automated tests** still use disposable local Supabase only. See [production operations](../production-operations.md) for the authorized deployment procedure and domain/SMTP setup.
 
 ## Schema boundary
 
@@ -66,9 +62,7 @@ to that credential permits impersonation and must be restricted accordingly.
   conflicts, populate party character references from the pinned public
   roster, and preserve the private-content boundary.
 
-O-025 (production operations/backups), O-026 (server-only mystery storage),
-and O-027 (public story/repository policy) remain open. No production or
-preview database is configured by this change.
+Production migrations have been applied, but O-025's backup/restore, retention and isolation decisions are not fully settled. O-026 (private mystery storage) and O-027 (public story/repository policy) remain open. Do not infer that PR previews are connected to a safe dedicated Supabase project.
 
 ## Invitation lifecycle
 
@@ -104,8 +98,7 @@ npx supabase test db
 npx supabase stop --no-backup
 ```
 
-`db reset` and `test db` target the local instance by default. Do not pass
-`--remote`, link a project, or use `db push`. Local Supabase prints generated
+`db reset` and `test db` are only permitted against the disposable local instance. A production link may exist in a developer Codespace; explicitly verify the target and never use `--remote`/`--linked` for test/reset operations. Review production migration deployments separately in [production operations](../production-operations.md). Local Supabase prints generated
 local API credentials at startup; keep them on the local machine and out of
 screenshots, logs, artifacts, and issue comments. No seed data is required;
 the pgTAP suite creates synthetic rows inside a transaction and rolls them

@@ -33,7 +33,7 @@ This document is a reproducible runbook, **not a statement that all account-leve
 1. Verify Vercel Git integration creates a *Preview* deployment for PR branches; distinguish it from the production domain.
 2. Verify access controls and secrets are scoped to preview environments, not production.
 3. For UI review, include the preview URL and a reproducible manual walkthrough in the PR.
-4. For backend integration tests, provision a dedicated Supabase test project or safe, isolated database branching. Never use production credentials/data for agent execution.
+4. For backend integration tests, use the existing disposable local Supabase CI database. Never use production credentials/data for agent execution.
 5. Document how to reset test data and expire ephemeral environments.
 
 ## Phase 4: incident-to-issue pipeline (not implemented)
@@ -68,7 +68,7 @@ Add dated links to real CI runs, PRs, screenshots and alert-created issues as th
 - Vercel preview deployment succeeded and its URL was opened by the human.
 - The repository owner reports that the `main` ruleset is configured.
 - During trial 1, GitHub asked the owner to approve an agent-originated workflow run. The owner subsequently disabled Copilot **Require approval for workflow runs** in repository settings.
-- **Not yet proven:** whether agent-generated workflow changes now run without an approval prompt. Trial 2 will measure that directly.
+- Later Copilot PRs and CI runs provide current evidence; see [agent evaluation](agent-evaluation.md) and the live [GitHub Actions](https://github.com/benburleson/one-killer-party/actions).
 
 ### Running CI without intermediate human approval
 

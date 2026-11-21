@@ -220,8 +220,7 @@ single-use, expiring and revocable.
   unreleased truth are absent.
 
 **Awaiting owner approval — O-025:** separate production environment, backups,
-retention, migration and recovery expectations. The first blocked work is
-**M1.3 persistence migrations/RLS**, and it also requires separately authorized
+retention, migration and recovery expectations. Migration implementation is complete, but future deployments require separately authorized
 isolated test database setup.
 
 **Awaiting owner approval — O-026:** choose server-only content storage (versioned
@@ -287,37 +286,15 @@ tests before merge.
   message ordering, client locks or optimistic UI to prevent double joining or
   duplicate assignments.
 
-## 8. Environment isolation and current verification
+## 8. Environment isolation and deployment boundary
 
-**Current setup: unverified for database integration.** Repository environment
-documentation says no isolated Supabase integration-test database is provisioned
-and the dev container does not create one. A development Supabase project was
-reported in product setup, but this ADR has not checked its configuration or
-credentials and does not infer a production project, safe test data, migrations,
-or preview isolation. No secrets were inspected.
+**Implemented:** M1.3 migrations/RLS and M1.4 host authentication/party commands are tested against disposable local Supabase in Codespaces and CI. The owner verified both migrations were subsequently applied to the linked production Supabase project. Magic-link host sign-in was smoke-tested on `https://app.onekillerparty.com/host`. Hosted Supabase custom SMTP was also configured by the owner for broader email delivery; operational settings and verification are recorded in [production operations](../production-operations.md).
 
-### Proposed actionable test strategy (requires explicit setup approval)
-
-1. Prefer a local, disposable Supabase stack backed by the official CLI and
-   local Docker for migration/RLS tests. Keep migrations under version control;
-   use a resettable, synthetic-only seed. Each test run starts/reset the local
-   database from migrations, then destroys or resets it after tests. Document
-   prerequisites; do not make a local CLI configuration imply a cloud project.
-2. If CI cannot run a local stack, provision a dedicated disposable test
-   project/database that is never production or preview backing data. Isolate
-   by CI run/schema, reset from reviewed migrations and synthetic fixtures, and
-   dispose/clean up deterministically. Do not run destructive reset commands
-   against any shared or production target.
-3. Keep credentials environment-scoped. Prefer ephemeral local test credentials
-   that are not repository secrets. If a dedicated remote test project is
-   approved, use only its narrowly scoped test credentials from protected CI
-   secret storage; never expose them to untrusted PRs or Playwright artifacts,
-   logs or browser bundles. No production secret is needed for a PR.
-4. Vercel previews use no production database/auth credentials. Keep preview
-   isolated from real parties; until an approved preview test project exists,
-   run landing-page UI checks only and report lobby integration as untested.
-5. Before M1.3, owner must explicitly authorize test DB setup and name its
-   isolation, reset and access policy. This ADR does not create/configure it.
+- Local and CI tests must use isolated synthetic accounts/data, never production secrets or production resets.
+- Privileged service-role credentials are server-only, scoped to each deployment environment; do not grant browser roles direct table access.
+- Vercel previews must not use production database/auth/service credentials. Until a dedicated preview backing environment is configured, do not claim preview host-flow isolation or run real data mutations.
+- Production migrations are separate, explicitly authorized operations: review project identity, backups/recovery requirements, and migration diffs before applying. A successful past migration is not permission to automatically apply future ones.
+- **Still open (O-025):** production backup/restore rehearsals, data retention, disaster recovery and fully isolated preview/testing environments.
 
 ## 9. Threat model and mitigations
 
@@ -351,7 +328,7 @@ Nothing below changes the product decision register. Every item marked
 | O-004 → D-024/D-025 | **Approved:** eight Blackwood slots, duplicate names allowed with disambiguation, shared reusable eight-character invitation code/link while lobby open, host regeneration; cryptographic generation and abuse mitigation required. | M1.4 invitation creation and M1.5 joining |
 | O-005 → D-025 | **Approved:** pre-start removal/replacement/reassignment with confirmation; no new participants or ordinary reassignment after start; existing guest reconnect/recovery allowed. | M1.5 joining; M1.6 assignment; later game-state implementation |
 | O-006 → D-023 | **Approved:** public role at assignment, own starting private dossier before game starts; future-act content phase-gated. | M1.6 assignment/private content and M1.7 reconnect/realtime content |
-| O-025 | **Awaiting owner approval:** production separation, migration process, backup/restore and retention/recovery; separately authorize isolated test DB setup. | M1.3 migrations/RLS and deployment/integration setup |
+| O-025 | **Partially implemented:** migrations deployed to production and local/CI DB isolation in place; backup/restore, retention, preview isolation and future deployment approval remain open. | Production operations and future migrations |
 | O-026 | **Awaiting owner approval:** server-only mystery storage, publication/versioning and authoring access. | M1.6/M1.7 private-content delivery or a dedicated content issue |
 | O-027 | **Awaiting owner approval:** public repository and story/IP/spoiler boundary. | Any public story/content release, deployment or portfolio disclosure |
 

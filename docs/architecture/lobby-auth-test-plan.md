@@ -1,7 +1,6 @@
 # Lobby authentication and persistence test plan
 
-**Status: M1.3 executable subset implemented; the remaining matrix is future
-acceptance coverage for M1.4–M1.7.**
+**Status: M1.3 schema/RLS and M1.4 host authentication/party creation coverage implemented; M1.5–M1.7 guest, assignment, and realtime coverage remains future work.**
 
 Use synthetic accounts, parties and mystery fixtures only. The M1.3 pgTAP
 subset runs against local Supabase migrations and real database roles; it
@@ -16,15 +15,13 @@ and unresolved operational/content decisions.
 The M1.3 database test covers the schema-level portions of T-06, T-07, T-08,
 T-09, T-10, T-12, T-15, T-16, T-22, and T-23. Because direct browser access
 is denied entirely, host and participant requests are currently expected to
-fail at the database privilege boundary; safe host/own-participant projections
-and allowed server-command behavior are follow-on work. Uniqueness constraints
+fail at the database privilege boundary; M1.4 implements limited, authorized host commands; guest participant projections and additional commands are follow-on work. Uniqueness constraints
 are tested with competing inserts; two-session race behavior and optimistic
 command-version conflicts remain deferred to M1.6.
 
 ### Follow-on slices
 
-The M1.1 issue's follow-on sequence is used because no separate M1.3–M1.7
-issues were present during this ADR:
+Milestone sequence:
 
 - **M1.3:** persistence migrations and RLS
 - **M1.4:** host authentication and party creation
