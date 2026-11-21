@@ -34,6 +34,11 @@ export function appOrigin(value: string | undefined): string {
   return url.origin;
 }
 
+/** Resolve the host CTA using the configured app origin, keeping local dev usable. */
+export function hostPageUrl(configuredAppUrl: string | undefined): string {
+  return configuredAppUrl ? `${appOrigin(configuredAppUrl)}/host` : "/host";
+}
+
 export function generateCode(): string {
   return Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join("");
 }
