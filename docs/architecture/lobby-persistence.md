@@ -10,9 +10,9 @@ Supabase project.
 
 The migration in `supabase/migrations/` creates:
 
-- `parties`: UUID identity, an `auth.users` host principal, pinned mystery ID
-  and version, `LOBBY`-only status, nonnegative nondecreasing party version,
-  and creation/update timestamps.
+- `parties`: UUID identity, an `auth.users` host principal, immutable pinned
+  mystery ID and version, `LOBBY`-only status, nonnegative nondecreasing party
+  version, and creation/update timestamps.
 - `participants`: UUID identity, party and authenticated-principal foreign
   keys, display name, and nullable assigned public character ID. A unique
   `(party_id, principal_id)` prevents duplicate membership. A partial unique
@@ -45,12 +45,13 @@ deliberate: no reviewed server command layer or safe database projection exists
 yet, so even a host cannot directly read the roster or invitation verifier.
 The API also disables automatic exposure of newly created tables.
 
-The party-version trigger is an invoker function with a fixed `pg_catalog`
-search path; it rejects version decreases and refreshes `updated_at`. Browser
-roles cannot execute it directly. No security-definer RPC or client-writable
-policy is introduced. Later server commands must derive identity from verified
-`auth.uid()`, authorize host and participant scopes independently, use
-allowlisted M1.1 projections, and keep privileged credentials server-only.
+The party-update trigger is an invoker function with a fixed `pg_catalog`
+search path; it rejects changes to the pinned mystery reference and version
+decreases, and refreshes `updated_at`. Browser roles cannot execute it
+directly. No security-definer RPC or client-writable policy is introduced.
+Later server commands must derive identity from verified `auth.uid()`,
+authorize host and participant scopes independently, use allowlisted M1.1
+projections, and keep privileged credentials server-only.
 
 - **M1.4:** authenticate the host and implement narrowly authorized party
   creation/host commands; host authority does not imply participant or
