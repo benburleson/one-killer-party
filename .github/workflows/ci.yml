@@ -93,3 +93,63 @@ jobs:
             playwright-report/
           if-no-files-found: warn
           retention-days: 14
+
+  browser-integration:
+    name: Local Supabase host integration (desktop and mobile)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start disposable local Supabase
+        run: npx supabase start >/dev/null 2>&1
+      - name: Reset from migrations
+        run: npx supabase db reset --no-seed
+      - name: Configure local-only credentials
+        shell: bash
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const { appendFileSync } = require("node:fs");
+          const status = JSON.parse(execFileSync("npx", ["supabase", "status", "-o", "json"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+          if (status.API_URL !== "http://127.0.0.1:54321" || !status.ANON_KEY || !status.SERVICE_ROLE_KEY ||
+              [status.ANON_KEY, status.SERVICE_ROLE_KEY].some(value => /[\r\n]/.test(value))) {
+            throw new Error("Local Supabase status is missing expected credentials or URL");
+          }
+          for (const value of [status.ANON_KEY, status.SERVICE_ROLE_KEY]) {
+            console.log(`::add-mask::${value}`);
+          }
+          appendFileSync(process.env.GITHUB_ENV, [
+            "APP_URL=http://127.0.0.1:3000",
+            `NEXT_PUBLIC_SUPABASE_URL=${status.API_URL}`,
+            `NEXT_PUBLIC_SUPABASE_ANON_KEY=${status.ANON_KEY}`,
+            `SUPABASE_SERVICE_ROLE_KEY=${status.SERVICE_ROLE_KEY}`,
+            "PLAYWRIGHT_LOCAL_SUPABASE=1",
+            "",
+          ].join("\n"));
+          NODE
+      - name: Production build with local Supabase
+        run: npm run build
+      - name: Run local integration tests
+        run: npm run test:e2e -- --project=integration-desktop --project=integration-mobile
+      - name: Upload safe sign-in evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-sign-in-evidence
+          path: test-results/**/host-sign-in.png
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Stop local Supabase and remove volumes
+        if: always()
+        run: npx supabase stop --project-id one-killer-party --no-backup >/dev/null 2>&1 || true
