@@ -1,6 +1,17 @@
 # ADR-0001: Lobby authentication and persistence
 
-**Status: Proposed — product-owner review required**
+**Status: Partially approved — D-020–D-023 confirmed; other open decisions await product-owner review**
+
+## Product-owner decisions recorded 2026-11-20
+
+The following decisions are now **CONFIRMED** in [the decision register](../product/decisions-and-open-questions.md), superseding the original "Awaiting owner approval" language where it refers to these exact policy choices:
+
+- `D-020 / O-001`: Supabase **email magic-link** host authentication. Email delivery and safe redirect/callback implementation remain technical work.
+- `D-021 / O-002`: individual low-friction authenticated guest identity and **host-assisted recovery** for a lost session. Never transfer membership on name or join code alone. Secure one-time credentials, host verification, audit and session revocation are mandatory security design work; exact mechanics are not yet approved as product policy.
+- `D-022 / O-003`: the host may participate or organize without playing. The initial Blackwood story has **eight total playable character slots**, whether or not the host plays. Host and participant scopes remain independent.
+- `D-023 / O-006`: public role shown upon assignment; **starting private dossier** accessible to its assigned player before the game starts; all future-act content remains phase-gated. Do not reveal murderer/solution information through host controls.
+
+Still **OPEN**: O-004 invitation encoding/expiry, name/capacity-edge behavior; O-005 participant admission, removal and reassignment rules; O-025 environment/operations authorization; O-026 content storage; O-027 public story disclosure. The suggestions below on these topics remain proposals until separately approved. A shared multi-guest party invite must not be confused with a single-use participant recovery credential.
 
 This ADR proposes a security and persistence boundary for the multiplayer
 lobby. It does not approve any open product decision, define a migration, or
@@ -58,10 +69,7 @@ approved preview callback patterns or use a stable, controlled preview domain.
 Keep local, preview, and production auth configuration separate. Never put
 provider or service-role credentials in browser code.
 
-**Awaiting owner approval — O-001:** choose magic link, password, OAuth or
-another mode; approve recovery expectations, email provider/dependencies,
-redirect policy and environment support before host sign-in implementation
-(first required by **M1.4 party creation**).
+**Approved — D-020 (formerly O-001):** use Supabase email magic links. Confirm email provider/delivery and redirect security during M1.4 implementation.
 
 ## 2. Guest identity and recovery — O-002
 
@@ -115,10 +123,7 @@ that guest until the session is revoked or expires. Host logout must end host
 authority; if the host also plays, it must not implicitly log in or out the
 separate participant membership.
 
-**Awaiting owner approval — O-002:** select the guest identity and recovery
-model, whether host-assisted reissue is allowed and under what verification,
-how session expiry/revocation works, and what happens after lost-device
-recovery. Resolve before **M1.5 guest joining** is implemented.
+**Approved direction — D-021 (formerly O-002):** support low-friction independent guest authentication with host-assisted identity recovery. M1.5 must specify and test host verification, one-time reissue, audit and token/session revocation before shipping.
 
 ## 3. Host as player — O-003
 
@@ -139,9 +144,7 @@ Whether a nonplaying host is allowed and whether the host counts toward any
 participant capacity remain **unresolved product choices**, not platform
 defaults.
 
-**Awaiting owner approval — O-003:** decide if a host may be nonplaying and how
-host participation affects counts/readiness before **M1.4 party creation** and
-before **M1.6 character assignment** encode roster readiness.
+**Approved — D-022 (formerly O-003):** the host may be nonplaying or one of the eight playable Blackwood characters. Readiness counts eight assigned player-character slots, not a mandatory host membership.
 
 ## 4. Other lobby policy choices — O-004, O-005 and O-006
 
@@ -153,10 +156,7 @@ These policies are explicitly not settled here:
 | O-005 | New late joins; removal; replacement; whether a participant can change identity or role; behavior before and after game start. | **M1.5 guest joining** must know who may join and when. **M1.6 assignment** must know removal/reassignment behavior; post-start changes require a separate gameplay-state decision before implementation. |
 | O-006 | When private role/background, murderer information and other private knowledge become visible: on assignment, game start, or act-by-act. | **M1.6 assignment** can create assignments without releasing secrets; private content delivery in **M1.7 realtime/reconnect** or a later content issue must wait for the owner-approved release rule. |
 
-**Awaiting owner approval:** O-004/O-005/O-006 choices are approval gates for
-the first issue that needs each policy. No recommendation in this ADR changes
-those product decisions; do not infer capacity, code format/expiry, duplicate
-names, late joining, removal, post-start replacements or private-role release.
+**Awaiting owner approval:** O-004 and O-005 remain policy gates; do not infer invite format/expiry, duplicate names, late joining or replacement behavior. **D-023 resolves O-006:** expose public role at assignment and starting private dossier before play, while future-act releases stay gated.
 
 ## 5. Persistence and spoiler safety — O-025, O-026 and O-027
 
@@ -336,16 +336,16 @@ or preview isolation. No secrets were inspected.
 Nothing below changes the product decision register. Every item marked
 **Awaiting owner approval** remains OPEN until an owner review is recorded.
 
-### (a) Recommendations needing product-owner approval before implementation
+### (a) Owner decisions and remaining recommendations
 
 | Spec ID | Proposed recommendation / unresolved choice | Future blocked issue |
 |---|---|---|
-| O-001 | **Awaiting owner approval:** default to host email magic link; approve recovery, delivery and callback/preview configuration. | M1.4 party creation / host authentication |
-| O-002 | **Awaiting owner approval:** anonymous authenticated guest principal plus a selected recovery option; explicitly decide host-assisted reissue, session loss, revocation and expiry. | M1.5 guest joining |
-| O-003 | **Awaiting owner approval:** keep host principal and optional participant membership separate; decide nonplaying host and participant-count behavior. | M1.4 creation and M1.6 assignment/readiness |
+| O-001 → D-020 | **Approved:** host email magic link. Verify delivery and callback/preview configuration during implementation. | M1.4 party creation / host authentication |
+| O-002 → D-021 | **Approved direction:** independent low-friction guest identity and host-assisted recovery; design and validate reissue, session loss, revocation and expiry. | M1.5 guest joining |
+| O-003 → D-022 | **Approved:** optional host participation and eight Blackwood player roles total; independent scopes. | M1.4 creation and M1.6 assignment/readiness |
 | O-004 | **Awaiting owner approval:** capacity, duplicate names, join credential format/entropy, expiry, rotation and invitation behavior. | M1.4 invitation creation and M1.5 joining |
 | O-005 | **Awaiting owner approval:** late joining, removal, replacement and role changes before/after start. | M1.5 joining; M1.6 assignment; post-start game-state implementation |
-| O-006 | **Awaiting owner approval:** timing and phase rules for private role/background and other secret releases. | M1.6 assignment/private content and M1.7 reconnect/realtime content |
+| O-006 → D-023 | **Approved:** public role at assignment, own starting private dossier before game starts; future-act content phase-gated. | M1.6 assignment/private content and M1.7 reconnect/realtime content |
 | O-025 | **Awaiting owner approval:** production separation, migration process, backup/restore and retention/recovery; separately authorize isolated test DB setup. | M1.3 migrations/RLS and deployment/integration setup |
 | O-026 | **Awaiting owner approval:** server-only mystery storage, publication/versioning and authoring access. | M1.6/M1.7 private-content delivery or a dedicated content issue |
 | O-027 | **Awaiting owner approval:** public repository and story/IP/spoiler boundary. | Any public story/content release, deployment or portfolio disclosure |
