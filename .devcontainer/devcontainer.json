@@ -1,6 +1,9 @@
 {
   "name": "One Killer Party",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
   "postCreateCommand": "npm ci && npx playwright install --with-deps chromium",
   "forwardPorts": [
     3000
