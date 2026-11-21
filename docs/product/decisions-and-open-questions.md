@@ -37,6 +37,12 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 | `D-017` | The user reported all eight initial setup tasks completed (local Next.js, GitHub, Supabase dev, env vars, landing page, Vercel) | User report; integration functionality not independently tested here |
 | `D-018` | GitHub is to support an autonomous **issue → implementation → PR → review/merge** portfolio workflow, with spec in repo | User's explicit goal in this request and project context |
 | `D-019` | Keep this product spec as six version-controlled Markdown files under `docs/product/` | Explicit user request |
+| `D-020` | Host authentication uses **Supabase email magic links**. Redirects and email-delivery configuration must be environment-scoped. | Product owner selection, 2026-11-20; resolves `O-001`; implementation remains subject to security testing |
+| `D-021` | Guests use independent low-friction authenticated identities and **host-assisted recovery** when an existing guest session is lost; joining by code/name never transfers an existing membership. | Product owner selection, 2026-11-20; resolves recovery direction in `O-002`; exact token/session mechanics remain engineering design |
+| `D-022` | Host **may choose to play or not play**; the first Blackwood mystery has **eight player-character slots total**, including the host only when explicitly enrolled as a player. Host operational privileges must not expose solution/private dossiers. | Product owner selection, 2026-11-20; resolves `O-003` and adopts exactly-eight Blackwood first-playtest scope from `P-001` |
+| `D-023` | Public character identity is visible on assignment; the assigned guest receives their **starting private dossier before the game starts**. Future-act clues, knowledge and revelations remain gated by authored release phase. | Product owner selection, 2026-11-20; resolves `O-006` at the policy level; exact preparation lead time is not fixed |
+| `D-024` | For the first Blackwood lobby, share one **reusable invitation link and equivalent eight-character easy-to-type code**. Valid only while party admission is open (until game start); host may revoke/regenerate it. Use cryptographically random code selection, rate limiting, nonrevealing failures and server-side verifiers. The join credential may enroll multiple distinct guests but cannot recover/take over an existing guest; recovery credentials are distinct, short-lived and single-use. | Product owner approval, 2026-11-20; resolves invitation policy of `O-004`. Exact alphabet, entropy safeguards and throttling are security implementation details |
+| `D-025` | First Blackwood game admits eight player participants, host counted only when playing; guest identities are unique independently of names. Duplicate display names are allowed, but disambiguated in host UI. Host may remove/replace guests and change role assignments **before** game start with confirmation when affecting an assigned role. Once started, deny new participants and ordinary role changes; existing authenticated members may reconnect or use approved host-assisted recovery. | Product owner approval, 2026-11-20; resolves `O-004` and `O-005` for first prototype, not a platform-wide limit or later-game recovery/replacement policy |
 
 **Caution on D-011–D-013:** They are stable, repeatedly stated design requirements, but specific UI details, automatic gates and exact schema remain proposals/open items.
 
@@ -44,15 +50,15 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 
 | ID | Proposal | What it implies / what is NOT yet confirmed |
 |---|---|---|
-| `P-001` | First full Blackwood prototype is **exactly 8 players** | Earlier 6–10 range is future roadmap; no variants authored |
+| `P-001` | First full Blackwood prototype is **exactly 8 players** | **Adopted for first Blackwood game via D-022**; 6–10 remains future roadmap without authored variants |
 | `P-002` | Game lasts ~90 minutes, Act I 20, Act II 25, Act III 25, finale 20 | Suggested pacing only; no forced automatic transitions |
 | `P-003` | Three acts, accusation phase, reveal, completion | Specific phase enum and locking implementation open |
 | `P-004` | One authored Blackwood mystery, Edmund as NPC victim, Theodore as culprit | Story draft created in conversation; needs narrative/editorial signoff |
 | `P-005` | Three short host-readable public events plus theatrical final reveal | Scripts are draft content, subject to playtest |
 | `P-006` | Each character gets 2–3 social missions per act, roughly one investigative, one interpersonal, one personal | Only initial mission examples are authored; full matrix not done |
 | `P-007` | Six public and eight private clue/knowledge cards in draft Blackwood | Content exists but epistemic labels and continuity need review |
-| `P-008` | Guests join by link / six-character code without email registration | Specific join-code format, guest identity/session recovery open |
-| `P-009` | Host uses email login and guests use anonymous authenticated sessions | Security approach recommended, not an approved exact Supabase configuration |
+| `P-008` | Guests join by link / six-character code without email registration | **Superseded by D-024:** an eight-character, easy-to-type code and reusable invitation link; guest auth direction D-021 |
+| `P-009` | Host uses email login and guests use anonymous authenticated sessions | Host magic-link authentication and low-friction guest identity/recovery direction adopted via D-020/D-021; specific guest Supabase auth/session implementation remains to be validated |
 | `P-010` | Use Next.js/React/TypeScript, Tailwind, Supabase/Postgres/Auth/Realtime, Vercel, GitHub | Stack selected in setup dialogue; detailed deployment/data model open |
 | `P-011` | Server-side state machine with optimistic version and transactional, idempotent releases | Core engineering direction; exact implementation/API contract open |
 | `P-012` | Guest sections My Character, My Clues, Party, Accusation; host adds Control | UI design proposal; routes, styling and navigation open |
@@ -71,16 +77,14 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 
 ## 4. Open questions — prioritize before engineering work
 
-### Blockers for lobby/auth implementation
+### Resolved lobby/auth decisions (2026-11-20)
+
+Owner-approved decisions: `O-001` → `D-020` (host email magic links), `O-002` → `D-021` (guest identity with host-assisted recovery), `O-003` → `D-022` (optional playing host, eight Blackwood player slots), `O-006` → `D-023` (public assignment and pre-start private dossier; future-act material remains gated), `O-004` → `D-024` and `D-025` (shared invitation and capacity/names), and `O-005` → `D-025` (join/removal/reassignment policy). These supersede the corresponding awaiting-approval entries in the proposed ADR in PR #14. Invitation/capacity and lifecycle policies in `O-004` and `O-005` were subsequently approved as `D-024` and `D-025`; see above. Technical implementation must still be reviewed and tested.
+
+### Remaining blockers for lobby/auth implementation
 
 | ID | Question | Why it matters | Proposed default for discussion (NOT decided) |
 |---|---|---|---|
-| `O-001` | Is host sign-in email/password, magic link, OAuth or another method? | Account recovery, auth implementation, deployment email setup | Supabase email magic link |
-| `O-002` | How does guest anonymous identity persist and recover after device loss? | Cannot allow party code alone to steal a role | Anonymous authenticated principal; host-mediated reissue token |
-| `O-003` | Does host count among exactly 8 players; can a nonplaying host run the game? | Lobby readiness and roster count | Eight **participants**, host included if playing |
-| `O-004` | How are names/duplicate names, invites, capacity and join-code expiry handled? | Duplicate abuse, user errors, privacy | Participant unique IDs, names may duplicate; limit lobby to 8 |
-| `O-005` | Can guests join late, be removed, replace someone, or change roles after start? | Security, gameplay continuity, role counts | Allow reconnect, block new guests after start |
-| `O-006` | Does role/private background unlock on assignment, on game start, or act-by-act? | Pre-party excitement vs timeline/spoiler risk | Public prep before party; sensitive knowledge by phase |
 | `O-007` | Is the app subdomain live via HTTPS and which production Supabase project, if any, backs it? | Deployment and secret scopes | Verify without changing DNS |
 | `O-008` | Exactly which existing GitHub workflows, branch protections and CI checks must a new PR satisfy? | Autonomous coding agents must follow established repo process | Inspect repository workflow/docs first |
 
@@ -176,4 +180,4 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 
 ## 9. Summary of what's *not* decided yet
 
-**Do not assume** the auth mode or recovery UX, paid hosting tiers, production DB, exact root-domain name, role exposure timing, handling late arrivals/nonvoters, final scoring, fictional-time framing, complete cast objective matrix, forensic detail provenance, content storage design, public repo disclosure policy or commercial pricing have already been approved. Treat them as explicitly open until recorded otherwise.
+**Do not assume** the exact recovery-token mechanism or security parameters for invitation entropy/throttling, paid hosting tiers, production DB, exact root-domain name, handling missing voters, final scoring, fictional-time framing, complete cast objective matrix, forensic detail provenance, content storage design, public repo disclosure policy or commercial pricing have already been approved. Treat them as explicitly open until recorded otherwise.
