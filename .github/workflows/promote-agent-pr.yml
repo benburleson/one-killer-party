@@ -1,21 +1,28 @@
-# Runs only from the trusted default branch after CI completes.
-# Does not check out or execute code from the pull request.
+# Both events use this trusted default-branch workflow; no PR code is checked out.
 name: Promote completed agent PR
 
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+  pull_request_target:
+    types: [edited]
 
 permissions:
   actions: read
   contents: read
   pull-requests: write
 
+concurrency:
+  group: promote-${{ github.event.workflow_run.head_repository.id || github.event.pull_request.head.repo.id }}-${{ github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
+  cancel-in-progress: false
+
 jobs:
   promote:
     name: Promote agent draft after verified CI
-    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success') ||
+          (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open' && github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -24,102 +31,136 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const run = context.payload.workflow_run;
             const { owner, repo } = context.repo;
-            const skip = (reason) => { core.info("Not promoting: " + reason); };
-
-            // Only trust CI executed for branches in this repository.
-            if (run.head_repository?.id !== context.payload.repository.id) {
-              skip("CI originated outside this repository");
-              return;
-            }
-            if (!run.head_branch?.startsWith("copilot/")) {
+            const repoId = context.payload.repository.id;
+            const eventRun = context.payload.workflow_run;
+            const edited = context.payload.pull_request;
+            const branch = eventRun?.head_branch || edited?.head?.ref;
+            const skip = reason => core.info("Not promoting: " + reason);
+            if (!branch?.startsWith("copilot/")) {
               skip("not a Copilot branch");
               return;
             }
 
-            // GitHub can omit pull_requests on workflow_run for some PRs.
             const listed = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: "open", per_page: 100,
             });
             const candidates = listed.filter(pr =>
-              pr.draft &&
-              pr.base.ref === "main" &&
-              pr.head.repo?.id === context.payload.repository.id &&
-              pr.head.ref === run.head_branch
+              pr.draft && pr.base.ref === "main" &&
+              pr.base.repo?.id === repoId && pr.head.repo?.id === repoId &&
+              pr.head.ref === branch
             );
-            if (candidates.length !== 1) {
-              skip("expected exactly one open draft PR for the branch");
+            if (candidates.length !== 1 || (edited && candidates[0].number !== edited.number)) {
+              skip("expected exactly one matching open draft PR for the branch");
               return;
             }
             const number = candidates[0].number;
             const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
-
-            // A CI run against an older revision must never promote a new revision.
-            // PR runs can identify either the head SHA or the generated merge SHA.
-            const eligibleSha = [pr.head.sha, pr.merge_commit_sha].includes(run.head_sha);
-            if (!eligibleSha) {
-              skip("CI is stale relative to current PR revision");
+            if (pr.state !== "open" || !pr.draft || pr.base.ref !== "main" ||
+                pr.base.repo?.id !== repoId || pr.head.repo?.id !== repoId ||
+                pr.head.ref !== branch) {
+              skip("PR is no longer an eligible open draft");
               return;
             }
-            if (!pr.draft || pr.state !== "open") {
-              skip("PR is no longer an open draft");
-              return;
-            }
-            if (/^\s*(\[WIP\]|WIP\b|\[Draft\]|Draft\b)/i.test(pr.title)) {
-              skip("agent still identifies PR as work in progress");
+            if (/^\s*(\[WIP\]|WIP\b|\[Draft\]|Draft\b)/i.test(pr.title) ||
+                /\b(blocked|awaiting agent|work in progress)\b/i.test(pr.title)) {
+              skip("agent still identifies PR as work in progress or blocked");
               return;
             }
 
-            const body = pr.body || "";
-            const sections = [
-              "## Validation",
-              "## Screenshots and browser evidence",
-              "## Human verification steps",
-            ];
-            if (sections.some(section => !body.includes(section))) {
+            // Count real Markdown sections, not headings hidden in comments, quotes or code.
+            const sections = new Map([
+              ["Validation", ""],
+              ["Screenshots and browser evidence", ""],
+              ["Human verification steps", ""],
+            ]);
+            let section = null;
+            let fence = null;
+            const body = (pr.body || "").replace(/<!--[\s\S]*?-->/g, "");
+            for (const line of body.split(/\r?\n/)) {
+              const marker = line.match(/^ {0,3}(`{3,}|~{3,})/);
+              if (marker) {
+                if (!fence) fence = marker[1];
+                else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+                continue;
+              }
+              if (fence || /^\s*>/.test(line) || /^ {4}/.test(line)) continue;
+              if (/^ {0,3}#\s/.test(line)) {
+                section = null;
+                continue;
+              }
+              const heading = line.match(/^ {0,3}##\s+(.+?)\s*#*\s*$/);
+              if (heading) {
+                section = sections.has(heading[1]) ? heading[1] : null;
+              } else if (section && !/^ {0,3}#{1,6}\s/.test(line)) {
+                sections.set(section, sections.get(section) + " " + line);
+              }
+            }
+            if ([...sections.values()].some(text =>
+              !text.replace(/<[^>]*>/g, "").replace(/[\s#*_\-\[\]`():.!]/g, "")
+            )) {
               skip("PR description does not contain complete reviewer handoff");
               return;
             }
-            if (/\b(blocked|awaiting agent|work in progress)\b/i.test(pr.title)) {
-              skip("PR reports a blocker");
+
+            // On an edit search only this repository's CI workflow; an edit is not evidence itself.
+            const runs = eventRun ? [eventRun] : await github.paginate(
+              github.rest.actions.listWorkflowRuns, {
+                owner, repo, workflow_id: "ci.yml", branch, event: "pull_request",
+                status: "success", per_page: 100,
+              }
+            );
+            let verified = false;
+            for (const run of runs) {
+              if (run.path !== ".github/workflows/ci.yml" ||
+                  run.event !== "pull_request" || run.status !== "completed" ||
+                  run.conclusion !== "success" || run.repository?.id !== repoId ||
+                  run.head_repository?.id !== repoId || run.head_branch !== branch ||
+                  ![pr.head.sha, pr.merge_commit_sha].filter(Boolean).includes(run.head_sha)) continue;
+              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+                owner, repo, run_id: run.id, per_page: 100,
+              });
+              if (artifacts.some(a => a.name === "playwright-evidence" &&
+                  !a.expired && a.size_in_bytes > 0)) {
+                verified = true;
+                break;
+              }
+            }
+            if (!verified) {
+              skip("no successful current CI run with nonempty, unexpired Playwright evidence");
               return;
             }
 
-            // CI success must include actual uploaded browser evidence.
-            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
-              owner, repo, run_id: run.id, per_page: 100,
-            });
-            if (!artifacts.some(a =>
-              a.name === "playwright-evidence" &&
-              !a.expired &&
-              a.size_in_bytes > 0
-            )) {
-              skip("no nonempty Playwright evidence artifact on the passing CI run");
-              return;
-            }
-
-            // Re-fetch immediately before the state change to reduce the
-            // chance of promoting a draft modified during verification.
             const { data: latest } = await github.rest.pulls.get({
               owner, repo, pull_number: number,
             });
-            if (!latest.draft ||
-                latest.head.sha !== pr.head.sha ||
-                latest.base.sha !== pr.base.sha ||
-                latest.title !== pr.title ||
-                latest.body !== pr.body) {
+            if (latest.state !== "open" || !latest.draft ||
+                latest.node_id !== pr.node_id ||
+                latest.head.repo?.id !== pr.head.repo?.id || latest.head.ref !== pr.head.ref ||
+                latest.head.sha !== pr.head.sha || latest.base.repo?.id !== pr.base.repo?.id ||
+                latest.base.ref !== pr.base.ref || latest.base.sha !== pr.base.sha ||
+                latest.merge_commit_sha !== pr.merge_commit_sha ||
+                latest.title !== pr.title || latest.body !== pr.body) {
               skip("PR changed during verification");
               return;
             }
 
-            const result = await github.graphql(
-              `mutation($id: ID!) {
-                 markPullRequestReadyForReview(input: { pullRequestId: $id }) {
-                   pullRequest { url isDraft }
-                 }
-               }`,
-              { id: latest.node_id }
-            );
-            core.notice("Promoted to ready for human review: " +
-              result.markPullRequestReadyForReview.pullRequest.url);
+            try {
+              const result = await github.graphql(
+                `mutation($id: ID!) {
+                   markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                     pullRequest { url isDraft }
+                   }
+                 }`,
+                { id: latest.node_id }
+              );
+              core.notice("Promoted to ready for human review: " +
+                result.markPullRequestReadyForReview.pullRequest.url);
+            } catch (error) {
+              const { data: current } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+              if (current.state === "open" && !current.draft) {
+                skip("PR is already ready for review");
+                return;
+              }
+              throw error;
+            }
