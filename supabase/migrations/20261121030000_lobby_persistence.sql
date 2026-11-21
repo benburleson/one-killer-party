@@ -17,6 +17,12 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
+  IF NEW.mystery_id IS DISTINCT FROM OLD.mystery_id
+    OR NEW.mystery_version IS DISTINCT FROM OLD.mystery_version THEN
+    RAISE EXCEPTION 'party mystery reference cannot change'
+      USING ERRCODE = '23514';
+  END IF;
+
   IF NEW.version < OLD.version THEN
     RAISE EXCEPTION 'party version cannot decrease'
       USING ERRCODE = '23514';

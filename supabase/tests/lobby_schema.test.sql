@@ -208,6 +208,13 @@ SELECT throws_ok(
   NULL,
   'party versions cannot decrease'
 );
+SELECT throws_ok(
+  $$UPDATE public.parties SET mystery_version = 'test-v2'
+    WHERE id = '10000000-0000-4000-8000-000000000001'$$,
+  '23514',
+  NULL,
+  'a party cannot change its pinned mystery version'
+);
 UPDATE public.parties
 SET version = version + 1
 WHERE id = '10000000-0000-4000-8000-000000000001';
