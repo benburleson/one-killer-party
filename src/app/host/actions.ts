@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { authClient, authConfig } from "@/lib/host/auth";
-import { safeAuthErrorDetails, validEmail, type IssueResult } from "@/lib/host/core";
+import { originMismatchDetails, safeAuthErrorDetails, validEmail, type IssueResult } from "@/lib/host/core";
 import { service } from "@/lib/host/service";
 
 async function sameOrigin() {
@@ -18,8 +18,13 @@ export async function signIn(_state: FormState, form: FormData): Promise<FormSta
   const neutralResponse = { message: "If sign-in is available, check your email for a link." };
   // Keep the response identical for all outcomes; diagnostic fields are fixed and non-identifying.
   try {
-    if (!(await sameOrigin())) {
-      console.warn("host_magic_link", { stage: "origin_rejected" });
+    const requestOrigin = (await headers()).get("origin");
+    const configuredOrigin = authConfig().origin;
+    if (requestOrigin !== configuredOrigin) {
+      console.warn("host_magic_link", {
+        stage: "origin_rejected",
+        ...originMismatchDetails(requestOrigin, configuredOrigin),
+      });
       return neutralResponse;
     }
     const email = form.get("email");

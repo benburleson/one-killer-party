@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appOrigin, generateCode, hostService, hostPageUrl, safeAuthErrorDetails, validEmail, verifiedEmailHost, verifier } from "../../src/lib/host/core.ts";
+import { appOrigin, generateCode, hostService, hostPageUrl, originMismatchDetails, safeAuthErrorDetails, validEmail, verifiedEmailHost, verifier } from "../../src/lib/host/core.ts";
 
 const host = "a0000000-0000-4000-8000-000000000001";
 const other = "a0000000-0000-4000-8000-000000000002";
@@ -35,6 +35,22 @@ test("host CTA uses APP_URL, including a distinct app subdomain, with local fall
   assert.equal(hostPageUrl(undefined), "/host");
   assert.throws(() => hostPageUrl("https://example.com/redirect"));
   assert.throws(() => hostPageUrl("http://untrusted.example.com"));
+});
+
+test("origin mismatch diagnostics report only fixed comparisons, not arbitrary headers", () => {
+  assert.deepEqual(originMismatchDetails("https://app.onekillerparty.com", "https://onekillerparty.com"), {
+    requestOriginPresent: true,
+    requestOriginIsCanonicalApp: true,
+    configuredOriginIsCanonicalApp: false,
+  });
+  assert.deepEqual(originMismatchDetails(null, "https://app.onekillerparty.com"), {
+    requestOriginPresent: false,
+    requestOriginIsCanonicalApp: false,
+    configuredOriginIsCanonicalApp: true,
+  });
+  const details = originMismatchDetails("https://attacker.example/?secret=token", "https://app.onekillerparty.com");
+  assert.equal(JSON.stringify(details).includes("secret"), false);
+  assert.equal(details.configuredOriginIsCanonicalApp, true);
 });
 
 test("authentication diagnostics whitelist only safe provider error details", () => {
