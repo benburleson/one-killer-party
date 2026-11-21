@@ -1,49 +1,41 @@
 # Automatically marking agent PRs ready for human review
 
-## Purpose
+## Purpose and triggers
 
-GitHub Copilot cloud agent creates **draft** pull requests and cannot mark them ready for review itself. This repository uses a small, trusted workflow, [`promote-agent-pr.yml`](../.github/workflows/promote-agent-pr.yml), to perform that transition after independently verified CI and reviewer handoff evidence.
+[`promote-agent-pr.yml`](../.github/workflows/promote-agent-pr.yml) rechecks an agent draft when successful `CI` pull-request `workflow_run` completes **or** when an open draft is edited using `pull_request_target` (`edited` only). An edit before CI succeeds does not promote; a later successful CI completion rechecks. If CI passes while the title is WIP, a subsequent title/body edit rechecks without a CI rerun.
 
-The workflow **never reviews, approves or merges** a PR. It cannot bypass the `main` branch ruleset.
+Both paths use the same eligibility checks against live GitHub metadata:
 
-## Trigger and checks
+1. Exactly one open draft for a same-repository `copilot/` branch targets `main`; on an edit its number must match the event.
+2. Its title does not start with the existing WIP/Draft markers or report a blocker. Its body has nonempty Validation, Screenshots and browser evidence, and Human verification steps sections. Headings hidden in comments, quotes or fenced code do not count.
+3. A completed successful pull-request run of `.github/workflows/ci.yml` belongs to this repository and branch and matches the current head SHA or current GitHub-generated merge SHA. The CI event uses its own run; the edit event searches that CI workflow. An edit alone is never CI evidence.
+4. That exact run has a nonempty, unexpired `playwright-evidence` artifact. Only artifact metadata is inspected.
+5. Immediately before mutation, the PR is re-fetched and its open/draft state, identity, head, base, merge SHA, title and body are compared. Any change causes a skip.
 
-The GitHub Actions `workflow_run` event fires when the established `CI` workflow completes. The promotion job runs only for successful pull-request CI events and then checks all of the following:
+The workflow never reviews, approves or merges a PR. Human review and `main` branch protections remain mandatory.
 
-1. CI came from a branch in this repository whose name starts with `copilot/`.
-2. There is exactly one open *draft* PR targeting `main` for that branch.
-3. CI completed for the PR's **current revision**, not a stale commit.
-4. The title no longer indicates WIP or Draft, and the body includes validation, screenshot evidence, and human verification sections.
-5. The successful CI run actually published a nonempty `playwright-evidence` artifact.
-6. The PR's head, base, title and description have not changed during the checks.
+## Security evaluation and limitations
 
-If any check fails, the workflow does **nothing** and logs the reason. The human reviewer can still mark a PR ready manually.
+`pull_request_target` is privileged and can be triggered by an edit to a fork PR. It is appropriate here **only** because the workflow is loaded from the trusted base/default branch, does not check out any code, does not interpolate event fields into the script, and never downloads or executes artifacts. It uses `actions: read`, `contents: read` and `pull-requests: write`; the only intended write is `markPullRequestReadyForReview`. Forks, non-Copilot branches, other bases and mismatched PRs are rejected using live metadata. Production secrets are not used. Changes to this trigger, workflow and permissions require explicit human security review before merge.
 
-**Limitation:** GitHub does not expose a universally reliable, separately verified “agent finished” signal in this workflow. The no-WIP title plus handoff sections are practical evidence of completion, not a guarantee. The promotion workflow must never be treated as code approval or a substitute for review.
+The branch prefix and PR text are **heuristics**, not authentication of the agent or independent proof that the handoff is true. Authorized contributors can create `copilot/` branches or write misleading text, and PR CI itself runs PR-controlled code. The artifact's name, size and expiry do not prove its contents or browser coverage. Review the PR, CI changes and evidence independently; this is not a security approval.
 
-## Security boundaries
+Concurrency serializes promotion jobs by branch without cancelling an in-progress job. GitHub retains at most one pending job per group, replacing older pending jobs with newer ones; each surviving job re-reads current state. Already-ready PRs are skipped, including a concurrent manual transition. The final re-fetch narrows but **cannot eliminate** a race: GitHub's ready-for-review mutation has no conditional head/body/state argument, so an edit or push between the last read and mutation can still race. The workflow cannot guarantee atomic unchanged state at mutation time.
 
-- The workflow file is trusted only from the repository's **default branch**.
-- It never checks out, builds or executes untrusted pull-request code.
-- The only write permission is `pull-requests: write` on the workflow token.
-- It does not download or execute artifacts; it inspects their GitHub API metadata.
-- Only same-repository `copilot/` branches targeting `main` qualify.
-- Production secrets are not used.
-- Agents cannot use this workflow to approve, merge or grant access.
+A previous attempt to perform the mutation with the existing token failed with `Resource not accessible by integration` ([run](https://github.com/benburleson/one-killer-party/actions/runs/44843152918)). The edit trigger does not resolve such a permission/ownership restriction. Do not expand permissions or bypass approval gates to force it; investigate with a human if it recurs.
 
-The privileged `workflow_run` trigger must remain isolated from untrusted PR source and artifacts. Changes to this file deserve special human scrutiny.
+## Verification plan and manual matrix
 
-## Verification plan
+Unit tests (`npm run test:unit`) execute the workflow's inline script with mocked GitHub APIs; they do **not** exercise GitHub event delivery, token authorization, actual artifacts or concurrent GitHub mutations. The following matrix is a reproducible **planned manual test**, not an observed result. Perform it only after human security review and merge, with an independent subsequent Copilot PR and appropriate isolated test PRs. Record PR/run/artifact links, timestamps, state transitions and any human intervention in [agent-evaluation.md](agent-evaluation.md). Do not merge automatically.
 
-1. Merge this workflow through a reviewed, human-controlled PR.
-2. Create and assign a small test issue to GitHub Copilot.
-3. Observe that the initial Copilot draft remains a draft during implementation.
-4. After the final successful CI run and a published `playwright-evidence` artifact, verify the **Promote completed agent PR** workflow transitions the draft to **Ready for review**.
-5. Confirm no manual workflow approval was required, no merge happened, and the promotion job logged the transition.
-6. Verify a failed CI run, a WIP PR, or a missing artifact **does not** promote the PR.
+| Setup/action | Expected observation |
+| --- | --- |
+| Edit an eligible WIP draft before CI completes; then finalize it before successful CI finishes | Edit leaves Draft; successful CI event promotes after evidence appears. |
+| Let CI pass while title is WIP; then finalize title and complete handoff | CI event skips; edit event promotes without a CI rerun. |
+| Edit with WIP/blocked title or an empty, commented-out, quoted or fenced handoff | Remains Draft. |
+| Edit with failed/pending CI, stale head/merge SHA, or missing, empty or expired artifact | Remains Draft. |
+| Edit fork, non-`copilot/`, wrong-base, closed, or unrelated PR | Remains unchanged. |
+| Trigger overlapping CI and edit rechecks; change head/body during verification or mark ready manually | No duplicate transition; changed state is skipped if observed by the final read. Record any narrower last-read/mutation race. |
+| Inspect workflow logs and PR | Only intended mutation occurs; no checkout, approval, merge or protection changes. |
 
-Record any failures or additional human intervention in [agent-evaluation.md](agent-evaluation.md).
-
-## Operational note
-
-If CI succeeds before Playwright evidence is uploaded or while the PR remains WIP, the workflow will skip promotion. A later successful CI run can retry. For an already completed draft with no further CI run, a human can mark it ready; do not invent a success signal.
+If GitHub suppresses an edit event, rejects the mutation, or evidence expires before finalization, record the failure; a human can review and mark the PR ready. No independent post-merge demonstration of this change has yet been observed.
