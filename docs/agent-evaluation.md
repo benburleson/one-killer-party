@@ -65,3 +65,22 @@ Advance from human-created issues to automated issue creation only after the age
 - [PR #14](https://github.com/benburleson/one-killer-party/pull/14): [CI run 44844288749](https://github.com/benburleson/one-killer-party/actions/runs/44844288749) passed with Playwright evidence, but [promotion run 44844408798](https://github.com/benburleson/one-killer-party/actions/runs/44844408798) skipped the WIP title. The final title edit did not recheck. The PR is now ready; the actor and exact action that changed its draft state have not been independently established in this record.
 - **New human interventions:** the CI rerun and human merge for #12, plus reporting and dispatching [issue #15](https://github.com/benburleson/one-killer-party/issues/15) for the repeated handoff failure. Do not infer the full intervention count or count this as an autonomous success.
 - **Next trial:** after human security review and merge, observe an independent agent PR completing both event orderings as feasible. Record event delivery, mutation authorization, CI and artifact links, and any human intervention. The proposed recheck and local mock tests are not proof of successful live promotion.
+
+## Trial 3 — Issue #18: M1.3 local Supabase lobby persistence (2026-11-21)
+
+**Evidence:** [Issue #18](https://github.com/benburleson/one-killer-party/issues/18) · [Draft PR #19](https://github.com/benburleson/one-killer-party/pull/19) · [CI run #42](https://github.com/benburleson/one-killer-party/actions/runs/44858549706) · [Playwright evidence artifact](https://github.com/benburleson/one-killer-party/actions/runs/44858549706/artifacts/14688876341)
+
+| Field | Observed |
+| --- | --- |
+| Trigger | Human-authored Issue #18 with detailed schema, security, test, and CI acceptance criteria |
+| Execution | Copilot worked in `copilot/m13-implement-local-supabase-lobby-schema`; one read-only repository exploration agent and one read-only security review agent were used |
+| Delivery | Added local-only lobby migrations, deny-by-default RLS/grants, pgTAP coverage, an ephemeral Supabase CI job, and local/security documentation |
+| Verification | Final CI run #42 passed: migration reset + all 52 pgTAP assertions + volume cleanup; lint/unit/typecheck/build passed; both desktop/mobile Chromium smoke tests passed |
+| Local checks | `npx supabase db reset --no-seed`, `npx supabase test db` (52 assertions), `npx supabase db lint`, `npm run test:unit` (9 tests), `npm run lint`, and `npx tsc --noEmit` passed |
+| Browser evidence | The existing landing-page smoke test passed on desktop and mobile Chromium. Its artifact was uploaded but not visually inspected; it is regression evidence, not proof of lobby behavior |
+| Preview | No preview URL was recorded or manually verified; this database-only change adds no UI flow |
+| Human interventions | After dispatch: no clarification, manual code change, workflow approval, or GitHub Actions retry |
+| Agent-side iterations | Eight local pgTAP invocations; four early runs exposed missing plan/fixture issues that were corrected before the final 52-pass run. Two local Next.js build attempts could not fetch the repository's existing Google Fonts; the final hosted CI build passed |
+| Safety | All database work used disposable local Supabase and deterministic synthetic identities. No hosted Supabase project, production data, or cloud credentials were used; generated local state was removed/ignored |
+| Outcome | PR #19 remains a draft for human review and human-only merge |
+| Learning | Keep startup output suppressed to protect generated local keys, and make the all-deny RLS decision explicit until reviewed server projections and commands exist |
