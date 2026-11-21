@@ -20,9 +20,11 @@ The workflow never reviews, approves or merges a PR. Human review and `main` bra
 
 The branch prefix and PR text are **heuristics**, not authentication of the agent or independent proof that the handoff is true. Authorized contributors can create `copilot/` branches or write misleading text, and PR CI itself runs PR-controlled code. The artifact's name, size and expiry do not prove its contents or browser coverage. Review the PR, CI changes and evidence independently; this is not a security approval.
 
+When GitHub reports a run's source head SHA rather than its merge SHA, a match establishes the current head but not that CI tested against the latest `main` commit. The live base is checked again for changes during verification, but base freshness since CI cannot be established from that head SHA alone. Human review and required CI/branch rules remain necessary.
+
 Concurrency serializes promotion jobs by head repository and branch without cancelling an in-progress job; a fork cannot displace a same-named branch's pending job. GitHub retains at most one pending job per group, replacing older pending jobs with newer ones; each surviving job re-reads current state. Already-ready PRs are skipped, including a concurrent manual transition. The final re-fetch narrows but **cannot eliminate** a race: GitHub's ready-for-review mutation has no conditional head/body/state argument, so an edit or push between the last read and mutation can still race. The workflow cannot guarantee atomic unchanged state at mutation time.
 
-A previous attempt to perform the mutation with the existing token failed with `Resource not accessible by integration` ([run](https://github.com/benburleson/one-killer-party/actions/runs/44843152918)). The edit trigger does not resolve such a permission/ownership restriction. Do not expand permissions or bypass approval gates to force it; investigate with a human if it recurs.
+A previous attempt to perform the mutation with the existing token failed with `Resource not accessible by integration` ([run](https://github.com/benburleson/one-killer-party/actions/runs/44843152918)). Similar token failures have been reported [upstream](https://github.com/cli/cli/issues/8910); their cause here is unconfirmed. The edit trigger does not resolve a token restriction. Do not expand permissions or bypass approval gates to force it; investigate with a human if it recurs.
 
 ## Verification plan and manual matrix
 

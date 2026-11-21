@@ -85,6 +85,10 @@ jobs:
                 continue;
               }
               if (fence || /^\s*>/.test(line) || /^ {4}/.test(line)) continue;
+              if (/^ {0,3}#\s/.test(line)) {
+                section = null;
+                continue;
+              }
               const heading = line.match(/^ {0,3}##\s+(.+?)\s*#*\s*$/);
               if (heading) {
                 section = sections.has(heading[1]) ? heading[1] : null;

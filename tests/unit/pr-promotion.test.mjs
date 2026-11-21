@@ -97,6 +97,7 @@ test("rejects unrelated, fork, non-draft, WIP and incomplete PRs", async () => {
     { body: body.split("\n").map(line => "> " + line).join("\n") },
     { body: "## Validation\n## Screenshots and browser evidence\n## Human verification steps" },
     { body: "## Validation\n### Results\n## Screenshots and browser evidence\n### Evidence\n## Human verification steps\n### Steps" },
+    { body: body.replace("Tests passed.", "# Unrelated\nTests passed.") },
   ]) {
     assert.equal((await check({ pull: { ...pr(), ...change } })).mutations, 0, JSON.stringify(change));
   }
