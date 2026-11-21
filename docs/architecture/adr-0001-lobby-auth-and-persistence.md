@@ -1,6 +1,6 @@
 # ADR-0001: Lobby authentication and persistence
 
-**Status: Partially approved — D-020–D-023 confirmed; other open decisions await product-owner review**
+**Status: Partially approved — D-020–D-025 confirmed; infrastructure/content decisions remain open**
 
 ## Product-owner decisions recorded 2026-11-20
 
@@ -10,8 +10,10 @@ The following decisions are now **CONFIRMED** in [the decision register](../prod
 - `D-021 / O-002`: individual low-friction authenticated guest identity and **host-assisted recovery** for a lost session. Never transfer membership on name or join code alone. Secure one-time credentials, host verification, audit and session revocation are mandatory security design work; exact mechanics are not yet approved as product policy.
 - `D-022 / O-003`: the host may participate or organize without playing. The initial Blackwood story has **eight total playable character slots**, whether or not the host plays. Host and participant scopes remain independent.
 - `D-023 / O-006`: public role shown upon assignment; **starting private dossier** accessible to its assigned player before the game starts; all future-act content remains phase-gated. Do not reveal murderer/solution information through host controls.
+- `D-024 / O-004`: one reusable party invitation link and equivalent eight-character human-readable code valid while lobby admission is open; host may revoke/regenerate. Cryptographically strong random generation, verifiers, rate limits and generic failures mandatory; distinct single-use recovery tokens.
+- `D-025 / O-004,O-005`: exactly eight playable Blackwood slots; host counts only if playing; duplicate display names allowed with host-side disambiguation; before start host may remove/replace participants and change assignments with confirmation. After start no new participants or ordinary role changes, but existing members can reconnect or use approved recovery.
 
-Still **OPEN**: O-004 invitation encoding/expiry, name/capacity-edge behavior; O-005 participant admission, removal and reassignment rules; O-025 environment/operations authorization; O-026 content storage; O-027 public story disclosure. The suggestions below on these topics remain proposals until separately approved. A shared multi-guest party invite must not be confused with a single-use participant recovery credential.
+Still **OPEN**: O-025 environment/operations authorization; O-026 content storage; O-027 public story disclosure. The exact invitation alphabet, abuse thresholds, session revocation and recovery credential mechanics require secure implementation and testing, but the policy in D-024/D-025 is confirmed. A shared multi-guest party invite must not be confused with a single-use participant recovery credential.
 
 This ADR proposes a security and persistence boundary for the multiplayer
 lobby. It does not approve any open product decision, define a migration, or
@@ -156,7 +158,7 @@ These policies are explicitly not settled here:
 | O-005 | New late joins; removal; replacement; whether a participant can change identity or role; behavior before and after game start. | **M1.5 guest joining** must know who may join and when. **M1.6 assignment** must know removal/reassignment behavior; post-start changes require a separate gameplay-state decision before implementation. |
 | O-006 | When private role/background, murderer information and other private knowledge become visible: on assignment, game start, or act-by-act. | **M1.6 assignment** can create assignments without releasing secrets; private content delivery in **M1.7 realtime/reconnect** or a later content issue must wait for the owner-approved release rule. |
 
-**Awaiting owner approval:** O-004 and O-005 remain policy gates; do not infer invite format/expiry, duplicate names, late joining or replacement behavior. **D-023 resolves O-006:** expose public role at assignment and starting private dossier before play, while future-act releases stay gated.
+**Approved:** D-024/D-025 resolve O-004/O-005 for the first Blackwood experience. The party invitation is multi-use during lobby admission, while recovery is participant-specific and single-use. D-023 resolves O-006: expose public role at assignment and starting private dossier before play; future-act releases stay gated. Exact secure token/randomness/rate-limit implementations and later-game exceptions remain engineering/future product work.
 
 ## 5. Persistence and spoiler safety — O-025, O-026 and O-027
 
@@ -169,7 +171,7 @@ or modify a database.
 | `parties` | `id`; `host_principal_id`; `mystery_id`, immutable `mystery_version`; `status`; monotonic integer `version`; timestamps. Index host and status/time as needed for host party listing. | `LobbyPartyRecord.id`, `hostPrincipalId`, `mysteryId`, `mysteryVersion`, `status`, `version`. The join credential itself is not part of a client projection. |
 | `participants` | `id`; `party_id` FK; `principal_id` (auth provider identity); `display_name`; nullable `assigned_character_id`; timestamps/state only when approved. Unique `(party_id, principal_id)` and unique `(party_id, assigned_character_id)` when assigned; index `(principal_id, party_id)` for identity-scoped lookup and `(party_id, id)` for roster projection. | `LobbyParticipantRecord.id`, `partyId`, `principalId`, `displayName`, optional `assignedCharacterId`. A participant is not implied by the host row. |
 | `public_character_roster` (optional reference) | Stable character ID plus approved public name/archetype, keyed by immutable mystery/version and character ID. No private dossier or culprit marker in the public table. | `PublicCharacterRosterEntry.id`, `publicName`, `publicArchetype`. May be derived from a safe server-side content projection instead of persisted separately. |
-| `invitation_credentials` | Credential ID; `party_id` FK; verifier/hash; purpose; created/expiry/revocation/consumption timestamps; optional nonsecret audit metadata. Index unique active verifier and `(party_id, expires_at)` for lookup/cleanup. Do not store raw bearer codes. | Resolves the M1.1 `joinCodeReference` to a credential record; neither raw code nor reference is returned in `HostLobbyView` or `ParticipantLobbyView`. |
+| `invitation_credentials` | Credential ID; `party_id` FK; verifier/hash; purpose; created/expiry/revocation timestamps; optional nonsecret audit metadata. Shared invitation codes are reusable while admission is open; single-use consumption applies to recovery credentials only. Index unique active verifier and `(party_id, expires_at)` for lookup/cleanup. Do not store raw bearer codes. | Resolves the M1.1 `joinCodeReference` to a credential record; neither raw code nor reference is returned in `HostLobbyView` or `ParticipantLobbyView`. |
 
 Unique constraints are required even when server checks exist: one principal's
 membership per party, one participant per character assignment per party, and
@@ -184,7 +186,7 @@ authoritative-state refresh instructions.
 
 ### Invitation credential recommendation
 
-The public code format is an open product decision (O-004). Independently of
+The public code format is approved as eight easy-to-type characters (D-024). Independently of
 that choice, recommend a cryptographically random, high-entropy invitation
 secret, stored server-side only as a verifier/hash; return the raw value only
 at issuance and never log it. Use rate limits and generic failures to reduce
@@ -343,8 +345,8 @@ Nothing below changes the product decision register. Every item marked
 | O-001 → D-020 | **Approved:** host email magic link. Verify delivery and callback/preview configuration during implementation. | M1.4 party creation / host authentication |
 | O-002 → D-021 | **Approved direction:** independent low-friction guest identity and host-assisted recovery; design and validate reissue, session loss, revocation and expiry. | M1.5 guest joining |
 | O-003 → D-022 | **Approved:** optional host participation and eight Blackwood player roles total; independent scopes. | M1.4 creation and M1.6 assignment/readiness |
-| O-004 | **Awaiting owner approval:** capacity, duplicate names, join credential format/entropy, expiry, rotation and invitation behavior. | M1.4 invitation creation and M1.5 joining |
-| O-005 | **Awaiting owner approval:** late joining, removal, replacement and role changes before/after start. | M1.5 joining; M1.6 assignment; post-start game-state implementation |
+| O-004 → D-024/D-025 | **Approved:** eight Blackwood slots, duplicate names allowed with disambiguation, shared reusable eight-character invitation code/link while lobby open, host regeneration; cryptographic generation and abuse mitigation required. | M1.4 invitation creation and M1.5 joining |
+| O-005 → D-025 | **Approved:** pre-start removal/replacement/reassignment with confirmation; no new participants or ordinary reassignment after start; existing guest reconnect/recovery allowed. | M1.5 joining; M1.6 assignment; later game-state implementation |
 | O-006 → D-023 | **Approved:** public role at assignment, own starting private dossier before game starts; future-act content phase-gated. | M1.6 assignment/private content and M1.7 reconnect/realtime content |
 | O-025 | **Awaiting owner approval:** production separation, migration process, backup/restore and retention/recovery; separately authorize isolated test DB setup. | M1.3 migrations/RLS and deployment/integration setup |
 | O-026 | **Awaiting owner approval:** server-only mystery storage, publication/versioning and authoring access. | M1.6/M1.7 private-content delivery or a dedicated content issue |
