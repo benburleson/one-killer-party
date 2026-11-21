@@ -62,6 +62,16 @@ export function safeAuthErrorDetails(error: { status?: unknown; code?: unknown }
   };
 }
 
+/** Fixed-value diagnostics for the canonical production host, never raw headers. */
+export function originMismatchDetails(requestOrigin: string | null, configuredOrigin: string) {
+  const canonicalAppOrigin = "https://app.onekillerparty.com";
+  return {
+    requestOriginPresent: requestOrigin !== null,
+    requestOriginIsCanonicalApp: requestOrigin === canonicalAppOrigin,
+    configuredOriginIsCanonicalApp: configuredOrigin === canonicalAppOrigin,
+  };
+}
+
 export function generateCode(): string {
   return Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join("");
 }
