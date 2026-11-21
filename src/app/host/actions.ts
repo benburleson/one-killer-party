@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { authClient, authConfig } from "@/lib/host/auth";
-import { validEmail, type IssueResult } from "@/lib/host/core";
+import { safeAuthErrorDetails, validEmail, type IssueResult } from "@/lib/host/core";
 import { service } from "@/lib/host/service";
 
 async function sameOrigin() {
@@ -15,19 +15,37 @@ async function sameOrigin() {
 export type FormState = { message?: string; result?: IssueResult; link?: string };
 
 export async function signIn(_state: FormState, form: FormData): Promise<FormState> {
+  const neutralResponse = { message: "If sign-in is available, check your email for a link." };
+  // Keep the response identical for all outcomes; diagnostic fields are fixed and non-identifying.
   try {
+    if (!(await sameOrigin())) {
+      console.warn("host_magic_link", { stage: "origin_rejected" });
+      return neutralResponse;
+    }
     const email = form.get("email");
-    if (await sameOrigin() && validEmail(email)) {
-      const client = await authClient();
-      await client.auth.signInWithOtp({
-        email: email.trim(),
-        options: { emailRedirectTo: `${authConfig().origin}/auth/callback` },
+    if (!validEmail(email)) {
+      console.warn("host_magic_link", { stage: "invalid_email_format" });
+      return neutralResponse;
+    }
+    const client = await authClient();
+    const { error } = await client.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: `${authConfig().origin}/auth/callback` },
+    });
+    if (error) {
+      console.warn("host_magic_link", {
+        stage: "provider_rejected",
+        ...safeAuthErrorDetails(error),
       });
+    } else {
+      // A successful API response does not guarantee delivery to the inbox.
+      console.info("host_magic_link", { stage: "provider_accepted" });
     }
   } catch {
-    // Deliberately use the same response for invalid emails and provider errors.
+    // Intentionally omit exception details: SDK errors can contain identifiers or request data.
+    console.error("host_magic_link", { stage: "unexpected_server_error" });
   }
-  return { message: "If sign-in is available, check your email for a link." };
+  return neutralResponse;
 }
 
 export async function signOut() {

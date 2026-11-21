@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appOrigin, generateCode, hostService, hostPageUrl, validEmail, verifiedEmailHost, verifier } from "../../src/lib/host/core.ts";
+import { appOrigin, generateCode, hostService, hostPageUrl, safeAuthErrorDetails, validEmail, verifiedEmailHost, verifier } from "../../src/lib/host/core.ts";
 
 const host = "a0000000-0000-4000-8000-000000000001";
 const other = "a0000000-0000-4000-8000-000000000002";
@@ -35,6 +35,17 @@ test("host CTA uses APP_URL, including a distinct app subdomain, with local fall
   assert.equal(hostPageUrl(undefined), "/host");
   assert.throws(() => hostPageUrl("https://example.com/redirect"));
   assert.throws(() => hostPageUrl("http://untrusted.example.com"));
+});
+
+test("authentication diagnostics whitelist only safe provider error details", () => {
+  assert.deepEqual(safeAuthErrorDetails({ status: 429, code: "over_email_send_rate_limit" }),
+    { status: 429, code: "over_email_send_rate_limit" });
+  assert.deepEqual(safeAuthErrorDetails({ status: 200, code: "private_secret_or_email" }),
+    { status: null, code: "other" });
+  assert.deepEqual(safeAuthErrorDetails({ status: "403", code: "email_address_not_authorized" }),
+    { status: null, code: "email_address_not_authorized" });
+  assert.deepEqual(safeAuthErrorDetails({ status: 500, code: "address@example.com" }),
+    { status: 500, code: "other" });
 });
 
 test("codes use an unambiguous alphabet and SHA-256 bytea format", () => {

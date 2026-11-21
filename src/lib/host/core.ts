@@ -39,6 +39,29 @@ export function hostPageUrl(configuredAppUrl: string | undefined): string {
   return configuredAppUrl ? `${appOrigin(configuredAppUrl)}/host` : "/host";
 }
 
+/** Logging allowlist: never serialize arbitrary Supabase error objects/messages. */
+export function safeAuthErrorDetails(error: { status?: unknown; code?: unknown }): {
+  status: number | null;
+  code: string;
+} {
+  const status = typeof error.status === "number" && Number.isInteger(error.status) &&
+    error.status >= 400 && error.status <= 599 ? error.status : null;
+  const allowedCodes = new Set([
+    "email_address_not_authorized",
+    "over_email_send_rate_limit",
+    "over_request_rate_limit",
+    "smtp_server_error",
+    "email_provider_disabled",
+    "validation_failed",
+    "signup_disabled",
+  ]);
+  return {
+    status,
+    code: typeof error.code === "string" && allowedCodes.has(error.code)
+      ? error.code : "other",
+  };
+}
+
 export function generateCode(): string {
   return Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join("");
 }
