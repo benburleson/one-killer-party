@@ -2,6 +2,9 @@
 
 **Status: Partially approved — D-020–D-025 confirmed; infrastructure/content decisions remain open**
 
+The M1.3 schema boundary, local commands, and deliberate no-browser-access
+policy are documented in [Lobby persistence and local database](lobby-persistence.md).
+
 ## Product-owner decisions recorded 2026-11-20
 
 The following decisions are now **CONFIRMED** in [the decision register](../product/decisions-and-open-questions.md), superseding the original "Awaiting owner approval" language where it refers to these exact policy choices:

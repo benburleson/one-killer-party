@@ -1,15 +1,25 @@
 # Lobby authentication and persistence test plan
 
-**Status: Proposed executable matrix — tests belong to M1.3–M1.7; no database
-was created or exercised for this documentation issue.**
+**Status: M1.3 executable subset implemented; the remaining matrix is future
+acceptance coverage for M1.4–M1.7.**
 
-This is a future acceptance matrix, not evidence that Supabase is configured.
-Use synthetic accounts, parties and mystery fixtures only. Each test must run
-against the same server authorization and database/RLS paths used by the app;
-mock-only tests cannot establish the RLS boundary. Do not use production
-credentials or data. The [ADR](adr-0001-lobby-auth-and-persistence.md) contains
-the proposed model, unresolved owner approvals and isolated-environment
-requirements.
+Use synthetic accounts, parties and mystery fixtures only. The M1.3 pgTAP
+subset runs against local Supabase migrations and real database roles; it
+establishes schema constraints, grants, RLS status, and denial of direct
+browser table access, not future server-command behavior. Each later API test
+must exercise the same authorization and database/RLS paths used by the app;
+mock-only tests cannot establish that boundary. Do not use production
+credentials or data. See [the M1.3 persistence guide](lobby-persistence.md)
+and the [ADR](adr-0001-lobby-auth-and-persistence.md) for the current model
+and unresolved operational/content decisions.
+
+The M1.3 database test covers the schema-level portions of T-06, T-07, T-08,
+T-09, T-10, T-12, T-15, T-16, T-22, and T-23. Because direct browser access
+is denied entirely, host and participant requests are currently expected to
+fail at the database privilege boundary; safe host/own-participant projections
+and allowed server-command behavior are follow-on work. Uniqueness constraints
+are tested with competing inserts; two-session race behavior and optimistic
+command-version conflicts remain deferred to M1.6.
 
 ### Follow-on slices
 
@@ -69,6 +79,10 @@ separately approved disposable database described in the ADR.
 - DB integration tests assert the database role, authenticated principal,
   RLS behavior, uniqueness and transaction outcomes using isolated test
   resources. Include both allowed and denied cases.
+- The M1.3 suite intentionally has no browser-role allowed table reads: all
+  `anon`/`authenticated` table privileges are revoked until a trusted
+  allowlisted server boundary exists. Tests assert RLS remains enabled so
+  removing RLS cannot silently pass merely because grants are also absent.
 - Playwright tests should use separate browser contexts for host, guest A,
   guest B, visitor and (where needed) a second party. Assert denial through
   direct routes/requests as well as visible controls. Use only synthetic
@@ -77,5 +91,6 @@ separately approved disposable database described in the ADR.
   availability, manual browser steps, interventions/retries, and remaining
   failures in the relevant PR. A passing landing-page screenshot is regression
   evidence only; it is not proof of lobby behavior.
-- No tests, migrations, screenshots, CI artifacts, or database execution were
-  added or performed by this documentation issue.
+- M1.3 local commands and CI evidence belong in the PR and
+  [persistence guide](lobby-persistence.md); do not treat this broader matrix
+  as proof that deferred API/UI flows have shipped.
