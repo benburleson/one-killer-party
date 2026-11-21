@@ -19,10 +19,11 @@ export default function Home() {
 
       <div className="mt-10 flex flex-wrap justify-center gap-4">
         <Link
-          href="/"
+          href="/host"
+          prefetch={false}
           className="rounded-lg bg-amber-300 px-6 py-3 font-semibold text-gray-950"
         >
-          Coming Soon
+          Host a party
         </Link>
       </div>
 

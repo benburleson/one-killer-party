@@ -1,6 +1,6 @@
 # Lobby persistence and local database
 
-**Status: M1.3 schema implemented; trusted application commands are deferred.**
+**Status: local lobby persistence and M1.4 host commands.**
 
 The local Supabase database is disposable and must contain only synthetic test
 data. These migrations are not permission to link, reset, or migrate any hosted
@@ -27,7 +27,7 @@ The migration in `supabase/migrations/` creates:
 - `invitation_credentials`: one active reusable invitation verifier per party,
   stored as a 32-byte digest with creation, revocation, and optional expiry
   metadata. There is no raw code column or guest-recovery credential table.
-  Issuance, verification, rate limiting, and recovery remain later work.
+  Guest verification, rate limiting, and recovery remain later work.
 
 No table stores solution material, private dossiers, a culprit marker, or
 invitation plaintext. The host is not a participant unless a separate
@@ -41,21 +41,24 @@ must enforce the approved story-specific limit.
 RLS is enabled on all four tables. No policies and no table privileges are
 granted to `anon` or `authenticated`; therefore visitors, unjoined users,
 participants, and hosts cannot directly read or mutate these tables. This is
-deliberate: no reviewed server command layer or safe database projection exists
-yet, so even a host cannot directly read the roster or invitation verifier.
+deliberate: even a host cannot directly read the roster or invitation verifier.
 The API also disables automatic exposure of newly created tables.
 
 The party-update trigger is an invoker function with a fixed `pg_catalog`
 search path; it rejects changes to the pinned mystery reference and version
 decreases, and refreshes `updated_at`. Browser roles cannot execute it
-directly. No security-definer RPC or client-writable policy is introduced.
-Later server commands must derive identity from verified `auth.uid()`,
-authorize host and participant scopes independently, use allowlisted M1.1
-projections, and keep privileged credentials server-only.
+directly. The host command RPCs are security-definer functions with a fixed
+search path and are executable only by `service_role`, not browser roles.
+The server verifies the Supabase user for each command or read and supplies
+that verified principal to the RPC; the RPC checks the stored host for
+party-specific operations. The service key is never sent to the browser.
+RPC responses contain only explicitly selected party fields, not invitation
+verifiers or private story data. The service-role boundary is trusted: access
+to that credential permits impersonation and must be restricted accordingly.
 
-- **M1.4:** authenticate the host and implement narrowly authorized party
-  creation/host commands; host authority does not imply participant or
-  author/solution authority.
+- **M1.4:** host authority does not imply participant or author/solution
+  authority. The pinned `blackwood-affair` / `first-playtest-placeholder-v1`
+  identifiers are nonsecret placeholders, not validated story content.
 - **M1.5:** implement guest identity, reusable invite validation, and separate
   host-assisted recovery credentials; rate limits and admission/capacity policy
   belong at this trusted command boundary.
@@ -66,6 +69,29 @@ projections, and keep privileged credentials server-only.
 O-025 (production operations/backups), O-026 (server-only mystery storage),
 and O-027 (public story/repository policy) remain open. No production or
 preview database is configured by this change.
+
+## Invitation lifecycle
+
+A cryptographically random eight-character code uses a 32-character alphabet
+without ambiguous characters (40 bits of entropy); only its 32-byte SHA-256
+verifier is stored. The host must save or share the code when it is
+displayed: a hash cannot be reversed to redisplay it. On returning to a lobby,
+the host can explicitly regenerate the code; the old code is revoked in the
+same transaction as the replacement. The command checks the party version
+shown when rotation was confirmed, so a stale concurrent request cannot
+silently replace a newer code. Regeneration affects everyone holding the
+previous link or code.
+
+The create request uses a party UUID as an idempotency key. A retry of the
+same request for the same host returns the existing party rather than creating
+another, but cannot redisplay the original code. The key is retained for
+retries in the current form, not across a page reload; after a lost response
+or reload, check the host's party list before deliberately creating a separate
+party with a new UUID. Codes are reusable for multiple guests under D-024,
+not recovery tokens. The database has no admission-close operation yet, so expiry at
+admission close is not implemented. Guest redemption, nonrevealing errors,
+rate limiting, and expiry at admission close are required in M1.5. Until
+then, the share link is only a placeholder and cannot enroll anyone.
 
 ## Local disposable database
 
@@ -92,14 +118,47 @@ executes denied requests under the `authenticated` database role with
 synthetic JWT claims. Keep database, API, and Studio ports private; the
 repository's devcontainer forwards only the application port.
 
+## Local host sign-in walkthrough
+
+Start the disposable local stack as above. In an uncommitted `.env.local`,
+set `APP_URL` to the exact app origin, `NEXT_PUBLIC_SUPABASE_URL` to the local
+API URL, `NEXT_PUBLIC_SUPABASE_ANON_KEY` to its local anon key, and
+`SUPABASE_SERVICE_ROLE_KEY` to its local service-role key. Obtain the values
+from local `npx supabase status` output without sharing or recording it.
+The service-role key is server-only; never use a `NEXT_PUBLIC_` prefix for it.
+Restart the app after changing environment variables.
+
+For localhost, use `http://127.0.0.1:3000` as `APP_URL` and open port 54324
+locally for the captured email. In Codespaces, forward port 3000 and the local
+email capture port 54324 as **Private**. The app origin must be the actual
+forwarded HTTPS origin, not `localhost` or a caller-provided header. GoTrue's
+confirmation link also needs a browser-reachable local API: forward 54321 as
+**Private**, and configure the local `[auth]` `external_url` to that exact
+forwarded origin with `/auth/v1` appended. Set local `site_url` and
+`additional_redirect_urls` to the exact app origin and callback
+`<app-origin>/auth/callback`; restart the local stack after changing these
+settings. Do not use wildcard preview domains or change hosted auth settings.
+These are local, environment-specific configuration edits: do not commit them.
+Codespaces forwarding and cookie behavior require a human walkthrough; they
+have not been independently verified by the database schema tests.
+
+Open the app and request a host sign-in link using a synthetic email address.
+Open the captured message in the private port 54324 interface, follow its
+link in the same browser, create a party, and save the displayed invitation
+securely. Reload the lobby and confirm it offers regeneration rather than
+reconstructing the old code. Sign out and confirm the lobby is inaccessible.
+Do not capture invitation codes, magic links, local keys, or email addresses
+in public screenshots, test artifacts, or logs.
+
 ## CI and review checklist
 
 The `Supabase migration and RLS tests` CI job starts a fresh local project on
 GitHub-hosted Ubuntu, resets from migrations without seeds, runs pgTAP tests,
 and removes its containers and volumes even after a failure. It needs no
 hosted Supabase credentials; startup output is suppressed so generated local
-keys are not put in Actions logs. Existing lint/type/build and Playwright jobs
-remain separate.
+keys are not put in Actions logs. A separate local-Supabase browser job tests
+the host flow without capturing sensitive invite or authentication data. The
+existing lint/type/build and landing-page Playwright jobs remain separate.
 
 Reviewers should confirm:
 
@@ -109,5 +168,5 @@ Reviewers should confirm:
 - [ ] Invite storage contains only a verifier, not a raw join code.
 - [ ] No authored mystery content, capacity rule, or recovery mechanism was
   introduced.
-- [ ] Any future read/write policies are reviewed alongside the trusted
-  server authorization and explicit M1.1 response projections.
+- [ ] Trusted RPC grants, host checks, and safe response projections are
+  reviewed independently of browser-side authorization.
