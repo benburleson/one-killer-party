@@ -14,7 +14,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: promote-${{ github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
+  group: promote-${{ github.event.workflow_run.head_repository.id || github.event.pull_request.head.repo.id }}-${{ github.event.workflow_run.head_branch || github.event.pull_request.head.ref }}
   cancel-in-progress: false
 
 jobs:
