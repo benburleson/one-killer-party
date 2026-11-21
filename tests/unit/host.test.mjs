@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appOrigin, generateCode, hostService, safeAuthErrorDetails, validEmail, verifiedEmailHost, verifier } from "../../src/lib/host/core.ts";
+import { appOrigin, generateCode, hostService, hostPageUrl, safeAuthErrorDetails, validEmail, verifiedEmailHost, verifier } from "../../src/lib/host/core.ts";
 
 const host = "a0000000-0000-4000-8000-000000000001";
 const other = "a0000000-0000-4000-8000-000000000002";
@@ -26,6 +26,15 @@ test("email validation and exact, secure callback origins", () => {
   for (const origin of [undefined, "http://example.test", "https://example.test/path", "https://user@example.test", "https://example.test/?x=1"]) {
     assert.throws(() => appOrigin(origin));
   }
+});
+
+test("host CTA uses APP_URL, including a distinct app subdomain, with local fallback", () => {
+  assert.equal(hostPageUrl("https://app.onekillerparty.com"), "https://app.onekillerparty.com/host");
+  assert.equal(hostPageUrl("https://app.onekillerparty.com/"), "https://app.onekillerparty.com/host");
+  assert.equal(hostPageUrl("http://localhost:3000"), "http://localhost:3000/host");
+  assert.equal(hostPageUrl(undefined), "/host");
+  assert.throws(() => hostPageUrl("https://example.com/redirect"));
+  assert.throws(() => hostPageUrl("http://untrusted.example.com"));
 });
 
 test("authentication diagnostics whitelist only safe provider error details", () => {

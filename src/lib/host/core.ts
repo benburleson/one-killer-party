@@ -34,6 +34,11 @@ export function appOrigin(value: string | undefined): string {
   return url.origin;
 }
 
+/** Resolve the host CTA using the configured app origin, keeping local dev usable. */
+export function hostPageUrl(configuredAppUrl: string | undefined): string {
+  return configuredAppUrl ? `${appOrigin(configuredAppUrl)}/host` : "/host";
+}
+
 /** Logging allowlist: never serialize arbitrary Supabase error objects/messages. */
 export function safeAuthErrorDetails(error: { status?: unknown; code?: unknown }): {
   status: number | null;
