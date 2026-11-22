@@ -32,6 +32,7 @@ export function TurnstileWidget({
     if (!container.current || !window.turnstile || widgetId.current !== null) return;
     widgetId.current = window.turnstile.render(container.current, {
       sitekey, action, "response-field": false,
+      appearance: "interaction-only",
       callback: (value: string) => { setToken(value); onVerifiedChange(true); },
       "expired-callback": invalidate,
       "error-callback": () => { invalidate(); return true; },
