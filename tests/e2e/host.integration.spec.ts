@@ -3,7 +3,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 // The local mail capture service (Mailpit in the current Supabase CLI) and
 // GoTrue are disposable. Never include message bodies or links in test output.
-async function signIn(page: Page) {
+async function requestMagicLink(page: Page) {
   const mailbox = `host-${randomUUID()}`;
   await page.goto("/host");
   await page.getByLabel("Email address").fill(`${mailbox}@example.test`);
@@ -29,6 +29,11 @@ async function signIn(page: Page) {
     if (!link) await page.waitForTimeout(1000);
   }
   if (!link) throw new Error("Local email was not received");
+  return link;
+}
+
+async function signIn(page: Page) {
+  const link = await requestMagicLink(page);
   const url = new URL(link);
   const redirect = new URL(url.searchParams.get("redirect_to") || "");
   if (url.origin !== "http://127.0.0.1:54321" || url.pathname !== "/auth/v1/verify" ||
@@ -120,6 +125,10 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await guestPage.getByLabel("Your display name").fill("Alex Guest");
     await guestPage.getByRole("button", { name: "Join party" }).click();
     await expect(guestPage.getByText("Your display name: Alex Guest")).toBeVisible();
+    await guestPage.screenshot({
+      path: testInfo.outputPath("guest-waiting-lobby.png"),
+      fullPage: true,
+    });
     for (const requestUrl of guestRequestUrls) {
       const request = new URL(requestUrl);
       if (request.searchParams.has("code") || request.searchParams.has("token") || requestUrl.includes(code)) {
@@ -135,7 +144,31 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(page.getByRole("heading", { name: "Players (1/8)" })).toBeVisible();
     const alexRow = page.getByRole("listitem").filter({ hasText: "Alex Guest" });
     await expect(alexRow.getByText(/Participant ID:/)).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("host-safe-roster.png"),
+      fullPage: true,
+    });
 
+    stage = "guest session protected from host sign-in";
+    await guestPage.goto("/host");
+    await expect(guestPage.getByRole("status")).toContainText("open host sign-in in a separate browser");
+    await expect(guestPage.getByLabel("Email address")).toHaveCount(0);
+    await guestPage.screenshot({
+      path: testInfo.outputPath("guest-session-preserved.png"),
+      fullPage: true,
+    });
+    const hostLoginContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    guestContexts.push(hostLoginContext);
+    const hostLoginPage = await hostLoginContext.newPage();
+    const hostMagicLink = await requestMagicLink(hostLoginPage);
+    const hostMagicUrl = new URL(hostMagicLink);
+    await guestPage.goto(hostMagicUrl.href);
+    await expect(guestPage).toHaveURL(/\/host\?auth=error$/);
+    await expect(guestPage.getByRole("status")).toContainText("This browser already has an authenticated session");
+    await guestPage.goto("/join");
+    await expect(guestPage.getByText("Your display name: Alex Guest")).toBeVisible();
+
+    await page.goto(partyPath);
     stage = "host-assisted session recovery";
     await alexRow.getByLabel("I have deliberately confirmed this guest’s identity out of band.").check();
     await alexRow.getByRole("button", { name: "Start guest recovery" }).click();

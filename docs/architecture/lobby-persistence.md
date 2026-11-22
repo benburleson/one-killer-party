@@ -105,9 +105,11 @@ admission-close operation exists until a later lifecycle-state migration.
 The local Supabase config enables anonymous sign-in. A guest receives an
 authenticated anonymous principal in an HTTP-only cookie; refreshing the same
 browser preserves the membership. A browser already signed in to a non-anonymous
-account is never silently switched: open guest play in a separate browser
-context. Hosts who choose to play use the explicit **Join as a player** action,
-not host status or an invitation.
+account is never silently switched. If a browser already has an authenticated
+session, use a separate browser profile or context to sign in as a host or join
+as a guest; host sign-in and its callback refuse to replace an active identity.
+Hosts who choose to play use the explicit **Join as a player** action, not host
+status or an invitation.
 
 `/join#code=XXXXXXXX` is read in the browser, then the fragment is replaced with
 the clean path before the code is submitted. The same form accepts a typed code.

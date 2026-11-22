@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
-import { currentUserId } from "@/lib/host/auth";
+import { currentUserId, hasAuthenticatedSession } from "@/lib/host/auth";
 import { service } from "@/lib/host/service";
 import { signOut } from "./actions";
 import { CreatePartyForm, SignInForm } from "./forms";
@@ -9,11 +9,23 @@ import { CreatePartyForm, SignInForm } from "./forms";
 async function Dashboard() {
   await connection();
   let user: string | null = null;
-  try { user = await currentUserId(); } catch { /* Show sign in when unavailable. */ }
+  let existingSession = false;
+  try {
+    user = await currentUserId();
+    if (!user) existingSession = await hasAuthenticatedSession();
+  } catch { /* Show sign in when unavailable. */ }
   if (!user) {
     return <><h1 className="text-3xl font-bold">Host sign in</h1>
-      <p className="mt-3">Sign in with an email magic link.</p>
-      <SignInForm />
+      {existingSession ? (
+        <p className="mt-3" role="status">
+          This browser already has an authenticated session. To preserve it, open host sign-in in a separate browser profile or context. This session will not be replaced here.
+        </p>
+      ) : (
+        <>
+          <p className="mt-3">Sign in with an email magic link.</p>
+          <SignInForm />
+        </>
+      )}
     </>;
   }
   let parties;

@@ -15,6 +15,12 @@ export function secureCookie(options: CookieOptions, secure: boolean): CookieOpt
   return { ...options, httpOnly: true, secure, sameSite: "lax", path: "/" };
 }
 
+export async function hasAuthenticatedSession(): Promise<boolean> {
+  const client = await authClient(true);
+  const { data, error } = await client.auth.getUser();
+  return !error && data.user !== null;
+}
+
 export async function authClient(readOnly = false) {
   const config = authConfig();
   const store = await cookies();

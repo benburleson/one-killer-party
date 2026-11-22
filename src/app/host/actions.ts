@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { authClient, authConfig, currentUserId } from "@/lib/host/auth";
+import { authClient, authConfig, currentUserId, hasAuthenticatedSession } from "@/lib/host/auth";
 import { originMismatchDetails, safeAuthErrorDetails, validEmail, type IssueResult } from "@/lib/host/core";
 import { service } from "@/lib/host/service";
 import { lobbyService } from "@/lib/lobby/service";
@@ -30,6 +30,7 @@ export async function signIn(_state: FormState, form: FormData): Promise<FormSta
       });
       return neutralResponse;
     }
+    if (await hasAuthenticatedSession()) return neutralResponse;
     const email = form.get("email");
     if (!validEmail(email)) {
       console.warn("host_magic_link", { stage: "invalid_email_format" });
