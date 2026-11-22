@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { TurnstileWidget } from "../turnstile-widget";
 import {
   assignCharacter,
@@ -92,7 +93,13 @@ export function CreatePartyForm() {
 }
 
 export function RotateForm({ partyId, version }: { partyId: string; version: number }) {
+  const [formKey, setFormKey] = useState(0);
+  return <RotateInviteForm key={formKey} partyId={partyId} version={version} reset={() => setFormKey((key) => key + 1)} />;
+}
+
+function RotateInviteForm({ partyId, version, reset }: { partyId: string; version: number; reset: () => void }) {
   const [state, action, pending] = useActionState(rotateInvite, {});
+  const uncertain = state.issuedVersion !== undefined && version > state.issuedVersion;
   return (
     <form action={action} className="space-y-4">
       <input type="hidden" name="partyId" value={partyId} />
@@ -105,7 +112,12 @@ export function RotateForm({ partyId, version }: { partyId: string; version: num
         <button className={button} disabled={pending}>Rotate invite</button>
       </>}
       {state.message && <p role="status">{state.message}</p>}
-      <InviteResult state={state} />
+      {uncertain ? (
+        <div role="status">
+          <p>The party changed since this invite was issued. It may have been replaced; issue a new code if needed.</p>
+          <button type="button" className="underline" onClick={reset}>Issue another invite</button>
+        </div>
+      ) : <InviteResult state={state} />}
     </form>
   );
 }
@@ -144,23 +156,38 @@ export function AssignCharacterForm({
     assignedCharacterId: string | null;
   }[];
 }) {
-  const [state, action, pending] = useActionState(assignCharacter, {});
-  const [selected, setSelected] = useState(participant.assignedCharacterId ?? "");
+  const router = useRouter();
+  const [draft, setDraft] = useState<{ selected: string; version: number } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [state, action, pending] = useActionState(async (previous: LobbyActionState, form: FormData) => {
+    const result = await assignCharacter(previous, form);
+    if (result.updated) {
+      setDraft(null);
+      setConfirmed(false);
+    } else if (result.conflict) {
+      router.refresh();
+    }
+    return result;
+  }, {});
+  const selected = draft?.selected ?? participant.assignedCharacterId ?? "";
+  const stale = draft !== null && draft.version !== version;
+  const selectedOccupied = selected !== "" && participants.some((candidate) =>
+    candidate.participantId !== participant.participantId && candidate.assignedCharacterId === selected);
   const replacing = participant.assignedCharacterId !== null &&
     selected !== participant.assignedCharacterId;
   return (
     <form action={action} className="mt-3 space-y-2">
       <input type="hidden" name="partyId" value={partyId} />
       <input type="hidden" name="participantId" value={participant.participantId} />
-      <input type="hidden" name="version" value={version} />
+      <input type="hidden" name="version" value={draft?.version ?? version} />
       <label className="block text-sm">Assigned public character
         <select
           className={`${field} mt-1`}
           name="characterId"
           value={selected}
+          disabled={pending}
           onChange={(event) => {
-            setSelected(event.target.value);
+            setDraft({ selected: event.target.value, version: draft?.version ?? version });
             setConfirmed(false);
           }}
         >
@@ -180,6 +207,16 @@ export function AssignCharacterForm({
           })}
         </select>
       </label>
+      {stale && (
+        <div className="space-y-2 text-sm" role="status">
+          <p>The roster changed while you were editing. Review the current assignments before retrying; your selection has been kept.</p>
+          <button type="button" className="underline" onClick={() => {
+            setDraft({ selected, version });
+            setConfirmed(false);
+          }}>Review and keep selection</button>
+        </div>
+      )}
+      {selectedOccupied && <p role="status" className="text-sm">That selection is now occupied. Choose an available character.</p>}
       {replacing && (
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -193,7 +230,7 @@ export function AssignCharacterForm({
           I confirm changing or clearing this assigned character.
         </label>
       )}
-      <button className={button} disabled={pending || (replacing && !confirmed)}>
+      <button className={button} disabled={pending || stale || selectedOccupied || (replacing && !confirmed)}>
         Save assignment
       </button>
       {state.message && <p role="status">{state.message}</p>}

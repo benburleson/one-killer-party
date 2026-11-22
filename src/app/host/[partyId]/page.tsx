@@ -8,6 +8,7 @@ import { lobbyService } from "@/lib/lobby/service";
 import { BLACKWOOD_PUBLIC_CHARACTERS } from "@/lib/lobby/public-characters";
 import { AssignCharacterForm, EnrollHostForm, RecoveryForm, RemoveParticipantForm, RotateForm } from "../forms";
 import { signOut } from "../actions";
+import { HostLobbySync } from "../../lobby-sync";
 
 async function Party({ params }: { params: Promise<{ partyId: string }> }) {
   await connection();
@@ -31,6 +32,7 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
     </div>
     <p className="mt-4">Party: {party.partyId}</p>
     <p>Status: {party.status} · Version: {roster.version}</p>
+    <HostLobbySync partyId={party.partyId} version={roster.version} />
     <h2 className="mb-3 mt-8 text-xl font-semibold">Public character roster</h2>
     <ul className="grid gap-3 sm:grid-cols-2" aria-label="Public character roster">
       {BLACKWOOD_PUBLIC_CHARACTERS.map((character) => {

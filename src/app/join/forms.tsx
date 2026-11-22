@@ -1,17 +1,31 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { joinParty, redeemRecovery, type GuestFormState } from "./actions";
 import { ClearFragment } from "./clear-fragment";
 import { TurnstileWidget } from "../turnstile-widget";
+import { useLobbySync } from "../lobby-sync";
+type GuestMembership = NonNullable<GuestFormState["membership"]>;
 
 const button = "rounded bg-amber-300 px-4 py-2 font-semibold text-gray-950 disabled:opacity-50";
 const field = "w-full rounded border border-gray-500 bg-gray-900 p-2 text-white";
 
-function WaitingLobby({ membership }: { membership: NonNullable<GuestFormState["membership"]> }) {
-  const router = useRouter();
+function validMembership(value: unknown): value is GuestMembership {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  if (typeof item.partyId !== "string" || typeof item.participantId !== "string" ||
+      typeof item.displayName !== "string" || item.status !== "LOBBY" ||
+      !Number.isSafeInteger(item.participantCount)) return false;
+  if (item.assignedCharacterId === null) return item.assignedCharacter === null;
+  if (typeof item.assignedCharacterId !== "string" ||
+      !item.assignedCharacter || typeof item.assignedCharacter !== "object") return false;
+  const card = item.assignedCharacter as Record<string, unknown>;
+  return card.id === item.assignedCharacterId && typeof card.publicName === "string" &&
+    typeof card.archetype === "string" && typeof card.description === "string";
+}
+
+function WaitingLobby({ membership, refresh }: { membership: GuestMembership; refresh: () => void }) {
   return (
     <section className="mt-8 space-y-3 rounded border border-gray-600 p-4" aria-label="Your guest lobby">
       <h2 className="text-xl font-semibold">You’re in the lobby</h2>
@@ -28,7 +42,7 @@ function WaitingLobby({ membership }: { membership: NonNullable<GuestFormState["
       <button
         type="button"
         className="text-sm text-amber-300 underline"
-        onClick={() => router.refresh()}
+        onClick={refresh}
       >
         Refresh assignment
       </button>
@@ -121,19 +135,43 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
   hostSession?: boolean;
 }) {
   const [inviteCode, setInviteCode] = useState("");
-  const [currentMembership, setCurrentMembership] = useState<NonNullable<GuestFormState["membership"]> | null>(null);
+  const [memberships, setMemberships] = useState(existingMemberships);
+  const [lostMembership, setLostMembership] = useState(false);
+  const hadMembership = useRef(existingMemberships.length > 0);
   const [recovering, setRecovering] = useState(false);
+  const joined = useCallback((membership: GuestMembership) => {
+    hadMembership.current = true;
+    setLostMembership(false);
+    setMemberships([membership]);
+  }, []);
+  const { reconnecting, refresh } = useLobbySync(
+    memberships.length ? "/join/sync" : null,
+    (data) => {
+      if (!data || typeof data !== "object" || !("memberships" in data) ||
+          !Array.isArray(data.memberships) || !data.memberships.every(validMembership)) {
+        throw new Error("Invalid lobby snapshot");
+      }
+      if (hadMembership.current && data.memberships.length === 0) setLostMembership(true);
+      hadMembership.current = data.memberships.length > 0;
+      setMemberships(data.memberships);
+    },
+    () => {
+      setMemberships([]);
+      setLostMembership(true);
+      hadMembership.current = false;
+    },
+  );
   return (
     <>
       <ClearFragment onCode={setInviteCode} />
-      {existingMemberships.length ? (
+      {reconnecting && memberships.length > 0 && <p role="status" className="mt-4 text-sm">Reconnecting to the lobby…</p>}
+      {lostMembership && <p role="status" className="mt-4">This browser no longer has access to that lobby. Ask the host for help.</p>}
+      {memberships.length ? (
         <div className="mt-8 space-y-4">
-          {existingMemberships.map((membership) => (
-            <WaitingLobby key={membership.participantId} membership={membership} />
+          {memberships.map((membership) => (
+            <WaitingLobby key={membership.participantId} membership={membership} refresh={refresh} />
           ))}
         </div>
-      ) : currentMembership ? (
-        <WaitingLobby membership={currentMembership} />
       ) : hostSession ? (
         <section className="mt-8 space-y-4 rounded border border-amber-300 p-4" role="status">
           <h2 className="text-xl font-semibold">Open this invitation in a private window</h2>
@@ -144,9 +182,9 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
       ) : (
         <section className="mt-6 space-y-4">
           {recovering ? (
-            <RecoveryForm onRecovered={setCurrentMembership} />
+            <RecoveryForm onRecovered={joined} />
           ) : (
-            <JoinForm code={inviteCode} setCode={setInviteCode} onJoined={setCurrentMembership} />
+            <JoinForm code={inviteCode} setCode={setInviteCode} onJoined={joined} />
           )}
           <button
             type="button"
