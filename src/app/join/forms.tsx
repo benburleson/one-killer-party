@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import Link from "next/link";
 import { joinParty, redeemRecovery, type GuestFormState } from "./actions";
 import { ClearFragment } from "./clear-fragment";
 import { TurnstileWidget } from "../turnstile-widget";
@@ -123,7 +124,7 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
           <h2 className="text-xl font-semibold">Open this invitation in a private window</h2>
           <p>You’re signed in as a host in this browser. To join as a guest without replacing your host session, open the invitation in a private/incognito window or a different browser.</p>
           <p>Your host session here will stay signed in.</p>
-          <a href="/host" className="inline-block underline">Return to host dashboard</a>
+          <Link href="/host" className="inline-block underline">Return to host dashboard</Link>
         </section>
       ) : (
         <section className="mt-6 space-y-4">
