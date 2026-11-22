@@ -39,8 +39,13 @@ export function TurnstileWidget({
   }, [sitekey, action, onVerifiedChange, invalidate]);
 
   useEffect(() => {
-    render();
+    // Next.js deduplicates scripts by URL. With join and recovery widgets on
+    // the same page, onReady might only fire for one Script instance.
+    // Notify every mounted widget once the shared API is available.
+    window.addEventListener("one-killer-party:turnstile-ready", render);
+    render(); // Also covers widgets mounted after the script finished loading.
     return () => {
+      window.removeEventListener("one-killer-party:turnstile-ready", render);
       if (widgetId.current !== null && window.turnstile) window.turnstile.remove(widgetId.current);
       widgetId.current = null;
     };
@@ -58,7 +63,8 @@ export function TurnstileWidget({
   return <div className="space-y-2">
     <Script
       src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
-      strategy="afterInteractive" onReady={render}
+      strategy="afterInteractive"
+      onReady={() => window.dispatchEvent(new Event("one-killer-party:turnstile-ready"))}
     />
     <div ref={container} aria-label="Human verification" />
     <input type="hidden" name="cf-turnstile-response" value={token} readOnly />

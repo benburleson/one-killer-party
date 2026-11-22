@@ -232,6 +232,12 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       await recoveryPage.goto("/join");
       await recoveryPage.getByLabel("Recovery credential").fill(recoveryToken);
     }
+    stage = "host-assisted recovery widget ready";
+    for (const recoveryPage of recoveryPages) {
+      await expect(recoveryPage.locator('[data-test-turnstile="guest_join"]')).toHaveCount(1);
+      await expect(recoveryPage.locator('[data-test-turnstile="guest_recovery"]')).toHaveCount(1);
+      await expect(recoveryPage.getByRole("button", { name: "Recover membership" })).toBeEnabled();
+    }
     stage = "host-assisted recovery challenge and submission";
     await Promise.all(recoveryPages.map((recoveryPage) =>
       verifiedSubmit(recoveryPage, "Recover membership")));
