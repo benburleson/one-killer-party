@@ -76,7 +76,7 @@ export async function joinParty(_state: GuestFormState, form: FormData): Promise
       principal.id,
       code,
       displayName,
-      requestRateBucket("join", principal, await headers()),
+      requestRateBucket("join", principal.id, await headers()),
     );
     if (membership && "partyId" in membership) return { membership };
     if (membership?.outcome === "full") {
@@ -98,7 +98,7 @@ export async function redeemRecovery(_state: GuestFormState, form: FormData): Pr
     const captchaToken = captchaTokenFromForm(form);
     if (!captchaToken) return { message: "Complete human verification and try again." };
     const principal = await guestPrincipal(captchaToken);
-    if (!principal) {
+    if (principal.kind === "account_conflict") {
       return { message: "This browser has another signed-in account. Open recovery in a separate browser context to keep that account unchanged." };
     }
     if (principal.kind === "anonymous_sign_in_failed") {
@@ -107,7 +107,7 @@ export async function redeemRecovery(_state: GuestFormState, form: FormData): Pr
     const membership = await lobbyService().redeemRecovery(
       principal.id,
       rawToken,
-      requestRateBucket("recovery", principal, await headers()),
+      requestRateBucket("recovery", principal.id, await headers()),
     );
     if (membership) return { membership };
   } catch {
