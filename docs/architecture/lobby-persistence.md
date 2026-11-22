@@ -128,8 +128,12 @@ Assignment drafts retain the version on which editing began. If another
 device changes the party, the host must review the refreshed roster before
 reapplying the preserved selection; optimistic database checks still reject
 races that happen before the refresh. No automatic retry overwrites another
-host's change. This does not resolve O-025–O-027 or add post-lobby gameplay,
-private dossiers, or clue delivery.
+host's change. Since the version does not identify which operation changed
+the party, a displayed rotated invitation is hidden conservatively after any
+later version change: it may have been replaced, even if the change was only
+an admission or assignment. The host can issue a fresh code if needed.
+This does not resolve O-025–O-027 or add post-lobby gameplay, private dossiers,
+or clue delivery.
 
 ## Invitation lifecycle
 

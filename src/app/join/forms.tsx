@@ -137,11 +137,12 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
   const [inviteCode, setInviteCode] = useState("");
   const [memberships, setMemberships] = useState(existingMemberships);
   const [lostMembership, setLostMembership] = useState(false);
-  const hadMembership = useRef(existingMemberships.length > 0);
+  const previousMembers = useRef(existingMemberships.map((membership) => membership.participantId));
   const [recovering, setRecovering] = useState(false);
   const joined = useCallback((membership: GuestMembership) => {
-    hadMembership.current = true;
+    previousMembers.current = [membership.participantId];
     setLostMembership(false);
+    setRecovering(false);
     setMemberships([membership]);
   }, []);
   const { reconnecting, refresh } = useLobbySync(
@@ -151,14 +152,15 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
           !Array.isArray(data.memberships) || !data.memberships.every(validMembership)) {
         throw new Error("Invalid lobby snapshot");
       }
-      if (hadMembership.current && data.memberships.length === 0) setLostMembership(true);
-      hadMembership.current = data.memberships.length > 0;
+      const currentIds = data.memberships.map((membership) => membership.participantId);
+      if (previousMembers.current.some((id) => !currentIds.includes(id))) setLostMembership(true);
+      previousMembers.current = currentIds;
       setMemberships(data.memberships);
     },
     () => {
       setMemberships([]);
       setLostMembership(true);
-      hadMembership.current = false;
+      previousMembers.current = [];
     },
   );
   return (

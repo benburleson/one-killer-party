@@ -200,7 +200,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(guestPage.getByText("Your display name: Alex Guest")).toBeVisible();
     await expect(guestPage.getByRole("button", { name: "Join party" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Players (1/8)" })).toBeVisible();
-    const alexRow = page.getByRole("list").filter({ has: page.getByRole("button", { name: "Save assignment" }) }).getByRole("listitem").filter({ hasText: "Alex Guest" });
+    const alexRow = page.getByRole("list").filter({ has: page.getByRole("button", { name: "Save assignment" }) }).getByRole("listitem").filter({ has: page.getByText("Alex Guest", { exact: true }) });
     await expect(alexRow.getByText(/Participant ID:/)).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("host-safe-roster.png"),
@@ -220,7 +220,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     const staleHostPage = await page.context().newPage();
     await staleHostPage.route("**/sync", (route) => route.abort());
     await staleHostPage.goto(partyPath);
-    const staleAlexRow = staleHostPage.getByRole("list").filter({ has: staleHostPage.getByRole("button", { name: "Save assignment" }) }).getByRole("listitem").filter({ hasText: "Alex Guest" });
+    const staleAlexRow = staleHostPage.getByRole("list").filter({ has: staleHostPage.getByRole("button", { name: "Save assignment" }) }).getByRole("listitem").filter({ has: staleHostPage.getByText("Alex Guest", { exact: true }) });
     await staleAlexRow.getByLabel("Assigned public character").selectOption("margot");
     await alexRow.getByLabel("Assigned public character").selectOption("vivienne");
     await alexRow.getByRole("button", { name: "Save assignment" }).click();
@@ -236,8 +236,11 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     stage = "stale version is rejected";
     await expect(staleAlexRow.getByText("The party changed since this roster loaded. Refresh and retry."))
       .toContainText("The party changed since this roster loaded. Refresh and retry.");
+    stage = "stale selection is retained";
     await expect(staleAlexRow.getByLabel("Assigned public character")).toHaveValue("margot");
+    stage = "stale roster refresh is explained";
     await expect(staleAlexRow.getByText(/roster changed while you were editing/)).toBeVisible();
+    await staleHostPage.unroute("**/sync");
     stage = "guest sees assigned public character live";
     await expect(guestPage.getByRole("heading", { name: "Vivienne Blackwood" })).toBeVisible({ timeout: 15000 });
     await guestPage.route("**/join/sync", (route) =>
@@ -284,6 +287,10 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await guestPage.unroute("**/join/sync");
     await guestPage.evaluate(() => window.dispatchEvent(new Event("online")));
     await expect(guestPage.getByRole("heading", { name: "Margot Sinclair" })).toBeVisible({ timeout: 15000 });
+    await expect(staleHostPage.getByRole("list", { name: "Public character roster" })
+      .getByRole("listitem").filter({ hasText: "Margot Sinclair" }))
+      .toContainText("Assigned to Alex Guest", { timeout: 15000 });
+    await expect(staleAlexRow.getByLabel("Assigned public character")).toHaveValue("margot");
     await alexRow.getByLabel("Assigned public character").selectOption("");
     await alexRow.getByLabel("I confirm changing or clearing this assigned character.").check();
     await alexRow.getByRole("button", { name: "Save assignment" }).click();
@@ -333,7 +340,9 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(otherGuestPage.getByRole("heading", { name: "Vivienne Blackwood" })).toHaveCount(0);
     stage = "host-assisted recovery initiation";
     await alexRow.getByLabel("I have deliberately confirmed this guest’s identity out of band.").check();
+    stage = "host-assisted recovery submission";
     await alexRow.getByRole("button", { name: "Start guest recovery" }).click();
+    stage = "host-assisted recovery credential";
     const recoveryToken = await alexRow.getByTestId("recovery-credential").textContent();
     if (!recoveryToken) throw new Error("Recovery credential unavailable");
     stage = "host-assisted recovery browser setup";
@@ -381,7 +390,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
 
     stage = "confirmed host removal and fresh replacement identity";
     await page.goto(partyPath);
-    const recoveredRow = page.getByRole("listitem").filter({ hasText: "Alex Guest" });
+    const recoveredRow = page.getByRole("listitem").filter({ has: page.getByText("Alex Guest", { exact: true }) });
     await recoveredRow.getByLabel("I confirm removing this participant before the game starts.").check();
     await recoveredRow.getByRole("button", { name: "Remove participant" }).click();
     await expect(page.getByRole("heading", { name: "Players (1/8)" })).toBeVisible();

@@ -176,7 +176,7 @@ export function AssignCharacterForm({
   const replacing = participant.assignedCharacterId !== null &&
     selected !== participant.assignedCharacterId;
   return (
-    <form action={action} className="mt-3 space-y-2">
+    <form action={action} className="mt-3 space-y-2" onReset={(event) => event.preventDefault()}>
       <input type="hidden" name="partyId" value={partyId} />
       <input type="hidden" name="participantId" value={participant.participantId} />
       <input type="hidden" name="version" value={draft?.version ?? version} />
