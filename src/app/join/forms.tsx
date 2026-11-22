@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import Link from "next/link";
 import { joinParty, redeemRecovery, type GuestFormState } from "./actions";
 import { ClearFragment } from "./clear-fragment";
 import { TurnstileWidget } from "../turnstile-widget";
@@ -100,11 +101,13 @@ function RecoveryForm({
   );
 }
 
-export function GuestEntry({ existingMemberships }: {
+export function GuestEntry({ existingMemberships, hostSession = false }: {
   existingMemberships: NonNullable<GuestFormState["membership"]>[];
+  hostSession?: boolean;
 }) {
   const [inviteCode, setInviteCode] = useState("");
   const [currentMembership, setCurrentMembership] = useState<NonNullable<GuestFormState["membership"]> | null>(null);
+  const [recovering, setRecovering] = useState(false);
   return (
     <>
       <ClearFragment onCode={setInviteCode} />
@@ -116,11 +119,28 @@ export function GuestEntry({ existingMemberships }: {
         </div>
       ) : currentMembership ? (
         <WaitingLobby membership={currentMembership} />
+      ) : hostSession ? (
+        <section className="mt-8 space-y-4 rounded border border-amber-300 p-4" role="status">
+          <h2 className="text-xl font-semibold">Open this invitation in a private window</h2>
+          <p>You’re signed in as a host in this browser. To join as a guest without replacing your host session, open the invitation in a private/incognito window or a different browser.</p>
+          <p>Your host session here will stay signed in.</p>
+          <Link href="/host" className="inline-block underline">Return to host dashboard</Link>
+        </section>
       ) : (
-        <>
-          <JoinForm code={inviteCode} setCode={setInviteCode} onJoined={setCurrentMembership} />
-          <RecoveryForm onRecovered={setCurrentMembership} />
-        </>
+        <section className="mt-6 space-y-4">
+          {recovering ? (
+            <RecoveryForm onRecovered={setCurrentMembership} />
+          ) : (
+            <JoinForm code={inviteCode} setCode={setInviteCode} onJoined={setCurrentMembership} />
+          )}
+          <button
+            type="button"
+            className="text-sm text-amber-300 underline"
+            onClick={() => setRecovering((value) => !value)}
+          >
+            {recovering ? "Join with an invitation code instead" : "Lost access to your guest session? Recover it"}
+          </button>
+        </section>
       )}
     </>
   );

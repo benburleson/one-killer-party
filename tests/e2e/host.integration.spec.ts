@@ -145,6 +145,10 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       await expect(otherPage.getByRole("heading", { name: "Host lobby" })).toBeVisible();
       await expect(otherPage.getByText("No players have joined yet.")).toHaveCount(0);
       await expect(otherPage.getByRole("button", { name: "Rotate invite" })).toHaveCount(0);
+      await otherPage.goto("/join");
+      await expect(otherPage.getByRole("heading", { name: "Open this invitation in a private window" })).toBeVisible();
+      await expect(otherPage.getByRole("button", { name: "Join party" })).toHaveCount(0);
+      await expect(otherPage.getByLabel("Recovery credential")).toHaveCount(0);
     } finally {
       await other.close();
     }
@@ -230,11 +234,14 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     const recoveryPages = await Promise.all(recoveryContexts.map((context) => context.newPage()));
     for (const recoveryPage of recoveryPages) {
       await recoveryPage.goto("/join");
+      await expect(recoveryPage.getByLabel("Recovery credential")).toHaveCount(0);
+      await expect(recoveryPage.locator('[data-test-turnstile="guest_join"]')).toHaveCount(1);
+      await recoveryPage.getByRole("button", { name: "Lost access to your guest session? Recover it" }).click();
       await recoveryPage.getByLabel("Recovery credential").fill(recoveryToken);
     }
     stage = "host-assisted recovery widget ready";
     for (const recoveryPage of recoveryPages) {
-      await expect(recoveryPage.locator('[data-test-turnstile="guest_join"]')).toHaveCount(1);
+      await expect(recoveryPage.locator('[data-test-turnstile="guest_join"]')).toHaveCount(0);
       await expect(recoveryPage.locator('[data-test-turnstile="guest_recovery"]')).toHaveCount(1);
       await expect(recoveryPage.getByRole("button", { name: "Recover membership" })).toBeEnabled();
     }

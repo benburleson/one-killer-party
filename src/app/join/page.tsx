@@ -17,12 +17,7 @@ async function JoinContent() {
     <div className="mx-auto max-w-2xl">
       <h1 className="text-3xl font-bold">Join the Blackwood Affair</h1>
       <p className="mt-4">Use the host’s invitation link or enter its eight-character code.</p>
-      {!memberships.length && user && !user.isAnonymous && (
-        <p className="mt-4 rounded border border-amber-300 p-3" role="status">
-          This browser is signed in to another account. Use a separate browser context for guest play; your current account will not be replaced.
-        </p>
-      )}
-      <GuestEntry existingMemberships={memberships} />
+      <GuestEntry existingMemberships={memberships} hostSession={!!user && !user.isAnonymous} />
     </div>
   </main>;
 }
