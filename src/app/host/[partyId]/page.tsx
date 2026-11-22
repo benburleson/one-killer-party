@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { service } from "@/lib/host/service";
 import { currentUserId } from "@/lib/host/auth";
 import { lobbyService } from "@/lib/lobby/service";
-import { EnrollHostForm, RecoveryForm, RemoveParticipantForm, RotateForm } from "../forms";
+import { BLACKWOOD_PUBLIC_CHARACTERS } from "@/lib/lobby/public-characters";
+import { AssignCharacterForm, EnrollHostForm, RecoveryForm, RemoveParticipantForm, RotateForm } from "../forms";
 import { signOut } from "../actions";
 
 async function Party({ params }: { params: Promise<{ partyId: string }> }) {
@@ -14,12 +15,13 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
   let party;
   try { party = await service().get(partyId); } catch { redirect("/host"); }
   if (!party) redirect("/host");
-  let participants;
+  let roster;
   try {
     const host = await currentUserId();
     if (!host) redirect("/host");
-    participants = await lobbyService().hostRoster(host, party.partyId);
+    roster = await lobbyService().hostRoster(host, party.partyId);
   } catch { redirect("/host"); }
+  const participants = roster.participants;
   const hostIsPlaying = participants.some((participant) => participant.isHost);
   const capacity = party.mysteryId === "blackwood-affair" ? 8 : null;
   return <>
@@ -28,7 +30,24 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
       <form action={signOut}><button className="underline">Sign out</button></form>
     </div>
     <p className="mt-4">Party: {party.partyId}</p>
-    <p>Status: {party.status} · Version: {party.version}</p>
+    <p>Status: {party.status} · Version: {roster.version}</p>
+    <h2 className="mb-3 mt-8 text-xl font-semibold">Public character roster</h2>
+    <ul className="grid gap-3 sm:grid-cols-2" aria-label="Public character roster">
+      {BLACKWOOD_PUBLIC_CHARACTERS.map((character) => {
+        const occupant = participants.find((participant) =>
+          participant.assignedCharacterId === character.id);
+        return (
+          <li key={character.id} className="rounded border border-gray-600 p-3">
+            <h3 className="font-semibold">{character.publicName}</h3>
+            <p className="text-sm text-amber-200">{character.archetype}</p>
+            <p className="mt-2 text-sm">{character.description}</p>
+            {occupant ? (
+              <p className="mt-2 text-sm">Assigned to {occupant.displayName} · Participant ID: {occupant.participantId}</p>
+            ) : <p className="mt-2 text-sm">Available</p>}
+          </li>
+        );
+      })}
+    </ul>
     <h2 className="mb-3 mt-8 text-xl font-semibold">
       Players ({participants.length}{capacity === null ? "" : `/${capacity}`})
     </h2>
@@ -38,6 +57,14 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
           <li key={participant.participantId} className="rounded border border-gray-600 p-3">
             <p className="font-semibold">{participant.displayName}{participant.isHost ? " (host)" : ""}</p>
             <p className="break-all font-mono text-sm text-gray-300">Participant ID: {participant.participantId}</p>
+            <AssignCharacterForm
+              key={participant.participantId}
+              partyId={party.partyId}
+              version={roster.version}
+              participant={participant}
+              participants={participants}
+              characters={BLACKWOOD_PUBLIC_CHARACTERS}
+            />
             {!participant.isHost && <>
               <RemoveParticipantForm partyId={party.partyId} participantId={participant.participantId} />
               <RecoveryForm partyId={party.partyId} participantId={participant.participantId} />
@@ -46,14 +73,16 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
         ))}
       </ul>
     )}
-    <p className="mt-4">Players are waiting for the host to assign characters.</p>
+    {participants.some((participant) => participant.assignedCharacterId === null) && (
+      <p className="mt-4">Players are waiting for the host to assign characters.</p>
+    )}
     <h2 className="mb-3 mt-8 text-xl font-semibold">Play in this party</h2>
     {hostIsPlaying ? <p>You are enrolled as a player.</p> : (
       <EnrollHostForm partyId={party.partyId} />
     )}
     <h2 className="mb-3 mt-8 text-xl font-semibold">Invite</h2>
     <p className="mb-4">Invite codes cannot be recovered. Rotate to issue a new code and invalidate the previous one.</p>
-    <RotateForm partyId={party.partyId} version={party.version} />
+    <RotateForm partyId={party.partyId} version={roster.version} />
     <p className="mt-8"><Link prefetch={false} className="underline" href="/host">Your parties</Link></p>
   </>;
 }

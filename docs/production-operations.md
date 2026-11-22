@@ -52,18 +52,27 @@ Troubleshooting: Vercel server log events tagged `host_magic_link` contain safe 
 
 Migrations are committed under `supabase/migrations/` and reviewed alongside their related PR. The owner confirmed `20261121030000_lobby_persistence.sql` and `20261121040000_host_party_commands.sql` were applied to the linked production Supabase project, and both versions appeared in the remote migration history.
 
-For **future** production changes:
+`20261122010000_public_character_assignment.sql` is an M1.6 production
+migration and is **not authorized for production by this PR**. It backfills
+only the eight public role IDs for parties pinned to
+`blackwood-affair` / `first-playtest-placeholder-v1`, updates the existing
+party-creation RPC to register those IDs for newly created parties, and adds
+the assignment and safe-read RPC projections. It does not add story content.
+All migration and integration tests must use the disposable local Supabase
+project; do not link or reset the production database.
+
+For this and other future production changes:
 
 1. Explicitly verify the linked **target project and environment**; inspect the target database and existing migration history. Plan backup/restore and rollback for destructive or data-changing operations.
 2. Review migration SQL and compare what would apply with `npx supabase migration list --remote` and `npx supabase db push --dry-run --remote`.
-3. Obtain specific human approval **per production migration** before using `npx supabase db push --remote`; review the CLI's exact target and migration list again at confirmation.
+3. Obtain specific human approval **for this migration** before using `npx supabase db push --remote`; review the CLI's exact target and migration list again at confirmation. Production DB migration must complete before the application rollout that uses the new RPCs.
 4. Verify remote migration history and app functionality after deployment. Record links and any incident in durable issue/PR evidence.
 
 **Never** run a remote/linked database reset, migrations from unreviewed agent code, or automated integration tests against Production. Local tests use `npx supabase db reset --no-seed` and `npx supabase test db` against disposable Docker Supabase only.
 
 ## Current limits and unfinished work
 
-M1.4 supplies host authentication, party creation, invitation issuance/rotation and a host-safe lobby. M1.5 guest joining, lobby admission, removal and host-assisted recovery are implemented in a pending migration and application change; they are not deployed to Production, and the shareable invitation URL does not admit players there until separately approved and applied. Supabase sessions from a recovered guest's lost browser cannot be globally revoked by this app because the supported admin sign-out call requires that session's JWT; rebinding and tombstoning remove that old principal's access to the recovered participant, but its access token may remain authenticated until expiry. Role assignment (M1.6), realtime/reconnect (M1.7) and private gameplay data are not available.
+M1.4 supplies host authentication, party creation, invitation issuance/rotation and a host-safe lobby. M1.5 guest joining, lobby admission, removal and host-assisted recovery are implemented in a pending migration and application change; they are not deployed to Production, and the shareable invitation URL does not admit players there until separately approved and applied. Supabase sessions from a recovered guest's lost browser cannot be globally revoked by this app because the supported admin sign-out call requires that session's JWT; rebinding and tombstoning remove that old principal's access to the recovered participant, but its access token may remain authenticated until expiry. M1.6 public role assignment is implemented in this branch but remains unavailable in Production until the separately human-approved database migration and app rollout. Realtime/reconnect (M1.7) and private gameplay data are not available.
 
 Production backups/restore rehearsal, retention, dedicated preview Supabase isolation, SMTP deliverability beyond owner test addresses, and anonymous-signup abuse monitoring still require verification/decisions (O-025, O-029). The database-backed rate limiter is distributed across app instances, but its principal fallback and forwarded-address proxy assumptions require monitoring before public promotion. This runbook records configuration and owner-reported results, not independent credentials inspection or permission for future production changes.
 

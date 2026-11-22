@@ -140,6 +140,49 @@ export async function removeParticipant(_state: LobbyActionState, form: FormData
   }
 }
 
+export async function assignCharacter(_state: LobbyActionState, form: FormData): Promise<LobbyActionState> {
+  try {
+    if (!(await sameOrigin())) return { message: "Request unavailable." };
+    const partyId = form.get("partyId");
+    const participantId = form.get("participantId");
+    const characterValue = form.get("characterId");
+    const rawVersion = form.get("version");
+    const version = typeof rawVersion === "string" && /^(0|[1-9]\d*)$/.test(rawVersion)
+      ? Number(rawVersion) : NaN;
+    const host = await currentUserId();
+    if (!host || typeof partyId !== "string" || typeof participantId !== "string" ||
+        typeof characterValue !== "string" || !Number.isSafeInteger(version)) {
+      return { message: "Could not update this assignment. Refresh the party and try again." };
+    }
+    const outcome = await lobbyService().assignCharacter(
+      host,
+      partyId,
+      participantId,
+      characterValue === "" ? null : characterValue,
+      version,
+      form.get("confirmChange") === "yes",
+    );
+    if (outcome === "changed" || outcome === "unchanged") {
+      // Refresh canonical roster only after successful assignment.
+      // A stale-version rejection must keep its local error message visible.
+      revalidatePath(`/host/${partyId}`);
+      return { message: "Character assignment updated." };
+    }
+    if (outcome === "conflict") {
+      return { message: "The party changed since this roster loaded. Refresh and retry." };
+    }
+    if (outcome === "occupied") {
+      return { message: "That character is already assigned. Refresh and choose an available role." };
+    }
+    if (outcome === "confirmation_required") {
+      return { message: "Confirm the reassignment or clearing before continuing." };
+    }
+  } catch {
+    // Never return database or provider errors.
+  }
+  return { message: "Could not update this assignment. Refresh the party and try again." };
+}
+
 export async function initiateRecovery(_state: LobbyActionState, form: FormData): Promise<LobbyActionState> {
   try {
     if (!(await sameOrigin()) || form.get("confirmIdentity") !== "yes") {
