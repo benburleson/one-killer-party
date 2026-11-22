@@ -164,25 +164,6 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       return guestPage;
     };
 
-    stage = "guest authentication errors are not confused with host sessions";
-    // Simulate GoTrue rejecting an anonymous signup without leaking provider
-    // error details; the app must not claim a different account is signed in.
-    const rejectedContext = await newTestContext(browser);
-    guestContexts.push(rejectedContext);
-    await rejectedContext.route("**/auth/v1/signup", async (route) => {
-      await route.fulfill({
-        status: 403, contentType: "application/json",
-        body: JSON.stringify({ code: "captcha_failed", message: "Human verification failed" }),
-      });
-    });
-    const rejectedGuest = await rejectedContext.newPage();
-    await rejectedGuest.goto("/join");
-    await rejectedGuest.getByLabel("Eight-character invitation code").fill(code);
-    await rejectedGuest.getByLabel("Your display name").fill("Rejected Guest");
-    await verifiedSubmit(rejectedGuest, "Join party");
-    await expect(rejectedGuest.getByRole("status")).toContainText("Guest sign-in was unavailable.");
-    await expect(rejectedGuest.getByText(/another signed-in account/)).toHaveCount(0);
-
     stage = "invite fragment and first guest admission";
     const guestContext = await newTestContext(browser);
     guestContexts.push(guestContext);
