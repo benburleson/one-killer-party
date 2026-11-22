@@ -64,7 +64,7 @@ export function TurnstileWidget({
     <Script
       src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
       strategy="afterInteractive"
-      onReady={() => window.dispatchEvent(new Event("one-killer-party:turnstile-ready"))}
+      onReady={() => { window.dispatchEvent(new Event("one-killer-party:turnstile-ready")); }}
     />
     <div ref={container} aria-label="Human verification" />
     <input type="hidden" name="cf-turnstile-response" value={token} readOnly />
