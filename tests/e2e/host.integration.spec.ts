@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 // The local mail capture service (Mailpit in the current Supabase CLI) and
 // GoTrue are disposable. Never include message bodies or links in test output.
@@ -41,6 +41,7 @@ async function signIn(page: Page) {
 
 test("local host sign-in, party access, isolation and sign-out", async ({ page, browser }, testInfo) => {
   let stage = "sign-in screen";
+  const guestContexts: BrowserContext[] = [];
   try {
     await page.goto("/host");
     await expect(page.getByRole("heading", { name: "Host sign in" })).toBeVisible();
@@ -76,11 +77,11 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
 
     stage = "reload and return to lobby";
     await page.goto(partyPath);
-    await expect(page.getByText("No guests yet")).toBeVisible();
+    await expect(page.getByText("No players have joined yet.")).toBeVisible();
     await page.reload();
-    await expect(page.getByText("No guests yet")).toBeVisible();
+    await expect(page.getByText("No players have joined yet.")).toBeVisible();
     await page.reload();
-    await expect(page.getByText("No guests yet")).toBeVisible();
+    await expect(page.getByText("No players have joined yet.")).toBeVisible();
     await expect(page.getByRole("region", { name: "New invite" })).toHaveCount(0);
 
     stage = "host B isolation";
@@ -90,11 +91,114 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       await signIn(otherPage);
       await otherPage.goto(partyPath);
       await expect(otherPage.getByRole("heading", { name: "Host lobby" })).toBeVisible();
-      await expect(otherPage.getByText("No guests yet")).toHaveCount(0);
+      await expect(otherPage.getByText("No players have joined yet.")).toHaveCount(0);
       await expect(otherPage.getByRole("button", { name: "Rotate invite" })).toHaveCount(0);
     } finally {
       await other.close();
     }
+
+    const makeGuest = async (displayName: string, code: string) => {
+      const context = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+      guestContexts.push(context);
+      const guestPage = await context.newPage();
+      await guestPage.goto("/join");
+      await guestPage.getByLabel("Eight-character invitation code").fill(code);
+      await guestPage.getByLabel("Your display name").fill(displayName);
+      await guestPage.getByRole("button", { name: "Join party" }).click();
+      return guestPage;
+    };
+
+    stage = "invite fragment and first guest admission";
+    const guestContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    guestContexts.push(guestContext);
+    const guestPage = await guestContext.newPage();
+    const guestRequestUrls: string[] = [];
+    guestPage.on("request", (request) => guestRequestUrls.push(request.url()));
+    await guestPage.goto(joinLink.href);
+    await expect(guestPage.getByLabel("Eight-character invitation code")).toHaveValue(code);
+    await expect.poll(() => guestPage.evaluate(() => window.location.hash)).toBe("");
+    await guestPage.getByLabel("Your display name").fill("Alex Guest");
+    await guestPage.getByRole("button", { name: "Join party" }).click();
+    await expect(guestPage.getByText("Your display name: Alex Guest")).toBeVisible();
+    for (const requestUrl of guestRequestUrls) {
+      const request = new URL(requestUrl);
+      if (request.searchParams.has("code") || request.searchParams.has("token") || requestUrl.includes(code)) {
+        throw new Error("Invitation credential appeared in a request URL");
+      }
+    }
+
+    stage = "same-session guest reconnect and safe host roster";
+    await guestPage.reload();
+    await expect(guestPage.getByText("Your display name: Alex Guest")).toBeVisible();
+    await expect(guestPage.getByRole("button", { name: "Join party" })).toHaveCount(0);
+    await page.goto(partyPath);
+    await expect(page.getByRole("heading", { name: "Players (1/8)" })).toBeVisible();
+    const alexRow = page.getByRole("listitem").filter({ hasText: "Alex Guest" });
+    await expect(alexRow.getByText(/Participant ID:/)).toBeVisible();
+
+    stage = "host-assisted session recovery";
+    await alexRow.getByLabel("I have deliberately confirmed this guest’s identity out of band.").check();
+    await alexRow.getByRole("button", { name: "Start guest recovery" }).click();
+    const recoveryToken = await alexRow.getByTestId("recovery-credential").textContent();
+    if (!recoveryToken) throw new Error("Recovery credential unavailable");
+    const recoveredContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    guestContexts.push(recoveredContext);
+    const recoveredPage = await recoveredContext.newPage();
+    await recoveredPage.goto("/join");
+    await recoveredPage.getByLabel("Recovery credential").fill(recoveryToken);
+    await recoveredPage.getByRole("button", { name: "Recover membership" }).click();
+    await expect(recoveredPage.getByText("Your display name: Alex Guest")).toBeVisible();
+    await expect(recoveredPage.getByRole("button", { name: "Recover membership" })).toHaveCount(0);
+    await guestPage.reload();
+    await expect(guestPage.getByLabel("Eight-character invitation code")).toBeVisible();
+    await guestPage.getByLabel("Eight-character invitation code").fill(code);
+    await guestPage.getByLabel("Your display name").fill("Alex Guest");
+    await guestPage.getByRole("button", { name: "Join party" }).click();
+    await expect(guestPage.getByText("That invitation could not be used. Check the code or ask the host for help.")).toBeVisible();
+
+    stage = "confirmed host removal and fresh replacement identity";
+    await page.goto(partyPath);
+    const recoveredRow = page.getByRole("listitem").filter({ hasText: "Alex Guest" });
+    await recoveredRow.getByLabel("I confirm removing this participant before the game starts.").check();
+    await recoveredRow.getByRole("button", { name: "Remove participant" }).click();
+    await expect(page.getByRole("heading", { name: "Players (0/8)" })).toBeVisible();
+    await recoveredPage.reload();
+    await recoveredPage.getByLabel("Eight-character invitation code").fill(code);
+    await recoveredPage.getByLabel("Your display name").fill("Alex Guest");
+    await recoveredPage.getByRole("button", { name: "Join party" }).click();
+    await expect(recoveredPage.getByText("That invitation could not be used. Check the code or ask the host for help.")).toBeVisible();
+    const replacementPage = await makeGuest("Replacement", code);
+    await expect(replacementPage.getByText("Your display name: Replacement")).toBeVisible();
+
+    stage = "atomic last-slot concurrent admission";
+    const fillers = [];
+    for (let index = 1; index <= 6; index++) {
+      fillers.push(await makeGuest(`Guest ${index}`, code));
+    }
+    const finalOneContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    const finalTwoContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    guestContexts.push(finalOneContext, finalTwoContext);
+    const finalOne = await finalOneContext.newPage();
+    const finalTwo = await finalTwoContext.newPage();
+    for (const finalPage of [finalOne, finalTwo]) {
+      await finalPage.goto("/join");
+      await finalPage.getByLabel("Eight-character invitation code").fill(code);
+      await finalPage.getByLabel("Your display name").fill("Last slot");
+    }
+    await Promise.all([
+      finalOne.getByRole("button", { name: "Join party" }).click(),
+      finalTwo.getByRole("button", { name: "Join party" }).click(),
+    ]);
+    await expect.poll(async () => {
+      const joinedCount = await Promise.all([finalOne, finalTwo].map((finalPage) =>
+        finalPage.getByRole("heading", { name: "You’re in the lobby" }).count()));
+      const fullCount = await Promise.all([finalOne, finalTwo].map((finalPage) =>
+        finalPage.getByText("This party is full. Ask the host for help.").count()));
+      return joinedCount.reduce((sum, value) => sum + value, 0) === 1 &&
+        fullCount.reduce((sum, value) => sum + value, 0) === 1;
+    }).toBe(true);
+    await page.goto(partyPath);
+    await expect(page.getByRole("heading", { name: "Players (8/8)" })).toBeVisible();
 
     stage = "sign-out";
     await page.goto("/host");
@@ -105,5 +209,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
   } catch {
     // Playwright errors may contain URLs or DOM text; retain only a safe stage.
     throw new Error(`Local integration failed at: ${stage}`);
+  } finally {
+    await Promise.all(guestContexts.map((context) => context.close()));
   }
 });

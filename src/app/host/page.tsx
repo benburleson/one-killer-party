@@ -28,7 +28,7 @@ async function Dashboard() {
       <h1 className="text-3xl font-bold">Host lobby</h1>
       <form action={signOut}><button className="underline">Sign out</button></form>
     </div>
-    <p className="my-4">Guest joining is not available yet.</p>
+    <p className="my-4">Guests can join your party with its reusable invitation code or link.</p>
     <h2 className="mb-3 mt-8 text-xl font-semibold">Your parties</h2>
     {parties.length === 0 ? <p>No parties yet.</p> :
       <ul className="space-y-2">{parties.map((party) =>

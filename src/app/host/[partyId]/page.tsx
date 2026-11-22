@@ -3,7 +3,9 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { service } from "@/lib/host/service";
-import { RotateForm } from "../forms";
+import { currentUserId } from "@/lib/host/auth";
+import { lobbyService } from "@/lib/lobby/service";
+import { EnrollHostForm, RecoveryForm, RemoveParticipantForm, RotateForm } from "../forms";
 import { signOut } from "../actions";
 
 async function Party({ params }: { params: Promise<{ partyId: string }> }) {
@@ -12,6 +14,13 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
   let party;
   try { party = await service().get(partyId); } catch { redirect("/host"); }
   if (!party) redirect("/host");
+  let participants;
+  try {
+    const host = await currentUserId();
+    if (!host) redirect("/host");
+    participants = await lobbyService().hostRoster(host, party.partyId);
+  } catch { redirect("/host"); }
+  const hostIsPlaying = participants.some((participant) => participant.isHost);
   return <>
     <div className="flex justify-between gap-4">
       <h1 className="text-3xl font-bold">Blackwood Affair</h1>
@@ -19,7 +28,26 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
     </div>
     <p className="mt-4">Party: {party.partyId}</p>
     <p>Status: {party.status} · Version: {party.version}</p>
-    <p className="mt-4">No guests yet. Guest joining is not available yet.</p>
+    <h2 className="mb-3 mt-8 text-xl font-semibold">Players ({participants.length}/8)</h2>
+    {participants.length === 0 ? <p>No players have joined yet.</p> : (
+      <ul className="space-y-4">
+        {participants.map((participant) => (
+          <li key={participant.participantId} className="rounded border border-gray-600 p-3">
+            <p className="font-semibold">{participant.displayName}{participant.isHost ? " (host)" : ""}</p>
+            <p className="text-sm text-gray-300">Participant ID: {participant.participantId.slice(0, 8)}</p>
+            {!participant.isHost && <>
+              <RemoveParticipantForm partyId={party.partyId} participantId={participant.participantId} />
+              <RecoveryForm partyId={party.partyId} participantId={participant.participantId} />
+            </>}
+          </li>
+        ))}
+      </ul>
+    )}
+    <p className="mt-4">Players are waiting for the host to assign characters.</p>
+    <h2 className="mb-3 mt-8 text-xl font-semibold">Play in this party</h2>
+    {hostIsPlaying ? <p>You are enrolled as a player.</p> : (
+      <EnrollHostForm partyId={party.partyId} />
+    )}
     <h2 className="mb-3 mt-8 text-xl font-semibold">Invite</h2>
     <p className="mb-4">Invite codes cannot be recovered. Rotate to issue a new code and invalidate the previous one.</p>
     <RotateForm partyId={party.partyId} version={party.version} />
