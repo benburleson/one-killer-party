@@ -1,8 +1,9 @@
+import { Suspense } from "react";
 import { connection } from "next/server";
 import { lobbyService, signedInUser, type GuestMembership } from "@/lib/lobby/service";
 import { GuestEntry } from "./forms";
 
-export default async function JoinPage() {
+async function JoinContent() {
   await connection();
   let user = null;
   let memberships: GuestMembership[] = [];
@@ -24,4 +25,12 @@ export default async function JoinPage() {
       <GuestEntry existingMemberships={memberships} />
     </div>
   </main>;
+}
+
+export default function JoinPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#171923] px-6 py-12 text-white">Loading lobby…</main>}>
+      <JoinContent />
+    </Suspense>
+  );
 }

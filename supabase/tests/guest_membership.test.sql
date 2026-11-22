@@ -298,7 +298,8 @@ SELECT is(
   true, 'host can initiate recovery for another current member'
 );
 UPDATE public.participant_recovery_tokens
-SET expires_at = now() - interval '1 second'
+SET created_at = now() - interval '1 day',
+    expires_at = now() - interval '1 second'
 WHERE verifier_hash = decode(repeat('ff', 32), 'hex');
 SELECT results_eq(
   $$SELECT outcome FROM public.redeem_participant_recovery(
