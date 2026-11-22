@@ -16,8 +16,11 @@ export async function GET(request: Request) {
   if (code && code.length <= 2048) {
     try {
       const client = await authClient();
-      const { error } = await client.auth.exchangeCodeForSession(code);
-      success = !error;
+      const { data: current, error: currentError } = await client.auth.getUser();
+      if (currentError || !current.user) {
+        const { error } = await client.auth.exchangeCodeForSession(code);
+        success = !error;
+      }
     } catch {
       // Do not expose provider errors or callback credentials.
     }

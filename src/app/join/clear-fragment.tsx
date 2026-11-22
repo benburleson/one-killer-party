@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect } from "react";
+import { invitationCodeFromFragment } from "@/lib/lobby/core";
 
-export function ClearFragment() {
+export function ClearFragment({ onCode }: { onCode: (code: string) => void }) {
   useEffect(() => {
-    if (window.location.hash) {
-      window.history.replaceState(window.history.state, "", window.location.pathname);
-    }
-  }, []);
+    const fragment = window.location.hash;
+    if (!fragment) return;
+    const code = invitationCodeFromFragment(fragment);
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname + window.location.search,
+    );
+    if (code) onCode(code);
+  }, [onCode]);
   return null;
 }

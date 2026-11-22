@@ -1,10 +1,10 @@
 # Lobby persistence and host commands
 
-The M1.3 and M1.4 migrations are version-controlled in `supabase/migrations/`. The owner verified they were applied to the hosted production Supabase project; all **automated tests** still use disposable local Supabase only. See [production operations](../production-operations.md) for the authorized deployment procedure and domain/SMTP setup.
+The M1.3 and M1.4 migrations are version-controlled in `supabase/migrations/`. The owner verified they were applied to the hosted production Supabase project; the M1.5 migration remains pending human review and separate production approval. All **automated tests** use disposable local Supabase only. See [production operations](../production-operations.md) for the authorized deployment procedure and domain/SMTP setup.
 
 ## Schema boundary
 
-The migration in `supabase/migrations/` creates:
+The migrations in `supabase/migrations/` create:
 
 - `parties`: UUID identity, an `auth.users` host principal, immutable pinned
   mystery ID and version, `LOBBY`-only status, nonnegative nondecreasing party
@@ -22,19 +22,29 @@ The migration in `supabase/migrations/` creates:
   exists in the pinned mystery version; this migration has no content catalog.
 - `invitation_credentials`: one active reusable invitation verifier per party,
   stored as a 32-byte digest with creation, revocation, and optional expiry
-  metadata. There is no raw code column or guest-recovery credential table.
-  Guest verification, rate limiting, and recovery remain later work.
+  metadata. There is no raw code column.
+- `lobby_rate_limits`: shared rolling request counts keyed by an HMAC of the
+  server-selected source address (or authenticated-principal fallback), never a
+  raw IP or credential.
+- `removed_participants`: a party/principal tombstone that prevents a removed
+  or recovered-away identity from using an invitation to rejoin that party.
+- `participant_recovery_tokens`: single-use recovery verifier, creator,
+  expiry, consumption and revocation timestamps. The bearer itself is never
+  stored.
+- `participant_recovery_audit`: nonsecret initiation, redemption and removal
+  events. No bearer values or invitation verifiers are recorded in the audit.
 
 No table stores solution material, private dossiers, a culprit marker, or
 invitation plaintext. The host is not a participant unless a separate
 `participants` row exists. D-022/D-025's eight player slots apply to the first
 Blackwood game, with the host counted only when explicitly enrolled. The
-database intentionally has no generic capacity limit; M1.5 admission logic
-must enforce the approved story-specific limit.
+database has no generic capacity constraint; trusted join and explicit host
+enrollment transactions serialize on the party row and enforce eight slots
+only for `blackwood-affair`.
 
 ## Browser access and server boundary
 
-RLS is enabled on all four tables. No policies and no table privileges are
+RLS is enabled on all eight tables. No policies and no table privileges are
 granted to `anon` or `authenticated`; therefore visitors, unjoined users,
 participants, and hosts cannot directly read or mutate these tables. This is
 deliberate: even a host cannot directly read the roster or invitation verifier.
@@ -43,7 +53,7 @@ The API also disables automatic exposure of newly created tables.
 The party-update trigger is an invoker function with a fixed `pg_catalog`
 search path; it rejects changes to the pinned mystery reference and version
 decreases, and refreshes `updated_at`. Browser roles cannot execute it
-directly. The host command RPCs are security-definer functions with a fixed
+directly. The host and guest command RPCs are security-definer functions with a fixed
 search path and are executable only by `service_role`, not browser roles.
 The server verifies the Supabase user for each command or read and supplies
 that verified principal to the RPC; the RPC checks the stored host for
@@ -55,9 +65,12 @@ to that credential permits impersonation and must be restricted accordingly.
 - **M1.4:** host authority does not imply participant or author/solution
   authority. The pinned `blackwood-affair` / `first-playtest-placeholder-v1`
   identifiers are nonsecret placeholders, not validated story content.
-- **M1.5:** implement guest identity, reusable invite validation, and separate
-  host-assisted recovery credentials; rate limits and admission/capacity policy
-  belong at this trusted command boundary.
+- **M1.5:** `join_party` validates the active stored invite verifier, status,
+  expiry, same-principal idempotency, removal tombstones and Blackwood capacity
+  under a per-party row lock. `get_guest_membership` returns only the caller's
+  safe lobby membership. `list_host_participants` returns the host-safe roster;
+  host enrollment, removal, recovery issuance and redemption are separate
+  commands. Invitation rotation remains compatible with M1.4.
 - **M1.6:** implement transactional assignment and optimistic version
   conflicts, populate party character references from the pinned public
   roster, and preserve the private-content boundary.
@@ -82,10 +95,59 @@ another, but cannot redisplay the original code. The key is retained for
 retries in the current form, not across a page reload; after a lost response
 or reload, check the host's party list before deliberately creating a separate
 party with a new UUID. Codes are reusable for multiple guests under D-024,
-not recovery tokens. The database has no admission-close operation yet, so expiry at
-admission close is not implemented. Guest redemption, nonrevealing errors,
-rate limiting, and expiry at admission close are required in M1.5. Until
-then, the share link is only a placeholder and cannot enroll anyone.
+not recovery tokens. Party status remains `LOBBY`-only, so the current
+transaction checks lobby admission but does not simulate a future game-start
+transition. Invitation expiry metadata is enforced when present; no automatic
+admission-close operation exists until a later lifecycle-state migration.
+
+## Guest identity, rate limits and recovery
+
+The local Supabase config enables anonymous sign-in. A guest receives an
+authenticated anonymous principal in an HTTP-only cookie; refreshing the same
+browser preserves the membership. A browser already signed in to a non-anonymous
+account is never silently switched. If a browser already has an authenticated
+session, use a separate browser profile or context to sign in as a host or join
+as a guest; host sign-in and its callback refuse to replace an active identity.
+Hosts who choose to play use the explicit **Join as a player** action, not host
+status or an invitation.
+
+`/join#code=XXXXXXXX` is read in the browser, then the fragment is replaced with
+the clean path before the code is submitted. The same form accepts a typed code.
+The fragment is not sent in HTTP requests, the app is no-store and sets
+`Referrer-Policy: no-referrer`, and this flow adds no third-party scripts or
+analytics. The code only travels in the server-action POST body and is never
+included in a query string or diagnostic log.
+
+The database rate limiter uses atomic fixed windows shared across serverless
+instances: 20 invitation attempts or 10 recovery attempts per 15 minutes, and
+five recovery-issuance attempts per host per 15 minutes. The app HMACs the
+source key using the server-only service key before it reaches the database.
+Vercel's normalized forwarded-client header is used when available; otherwise
+the bucket falls back to the authenticated principal. Expired buckets are
+deleted opportunistically after one day. The fallback can be evaded by creating
+new anonymous identities, and non-Vercel deployments must ensure their reverse
+proxy overwrites forwarded-address headers. Supabase Auth's anonymous-signup
+limits are an additional layer, not a substitute. Monitor abuse and reassess
+limits/retention before public promotion; no third-party limiter is configured.
+
+Recovery requires the host to confirm the guest's identity out of band. It
+generates a distinct 256-bit random token, stores only its SHA-256 verifier, and
+expires it after 15 minutes. The host sees the bearer once and must deliver it
+out of band. Redemption is locked and single-use; it rebinds the existing
+participant to a newly authenticated anonymous principal, records nonsecret
+audit metadata, and tombstones the previous principal so it cannot rejoin using
+the invite. Invalid, expired, revoked, replayed and forged tokens return the
+same guest-facing error. The host cannot redeem the token or read participant
+private content.
+
+Rebinding removes the previous principal's authority to that membership, but
+does not immediately revoke its already-issued Supabase access JWT. Supabase's
+admin sign-out API requires the session JWT rather than a user ID, which this
+server does not possess for a lost browser. The previous token may remain
+authenticated until expiry, but no longer resolves to the recovered participant
+in this party; other authority attached to that old account is not revoked.
+Review supported Supabase session-revocation APIs before promising global
+revocation.
 
 ## Local disposable database
 
@@ -105,7 +167,7 @@ the pgTAP suite creates synthetic rows inside a transaction and rolls them
 back.
 
 To inspect RLS locally, open Supabase Studio at
-`http://127.0.0.1:54323` after `supabase start`, then inspect the four tables'
+`http://127.0.0.1:54323` after `supabase start`, then inspect the tables'
 RLS status and grants. The SQL test suite also checks catalog state and
 executes denied requests under the `authenticated` database role with
 synthetic JWT claims. Keep database, API, and Studio ports private; the
@@ -136,12 +198,18 @@ Codespaces forwarding and cookie behavior require a human walkthrough; they
 have not been independently verified by the database schema tests.
 
 Open the app and request a host sign-in link using a synthetic email address.
-Open the captured message in the private port 54324 interface, follow its
-link in the same browser, create a party, and save the displayed invitation
+Open the captured message in the private port 54324 interface, follow its link
+in the same browser, create a party, and save the displayed invitation
 securely. Reload the lobby and confirm it offers regeneration rather than
-reconstructing the old code. Sign out and confirm the lobby is inaccessible.
-Do not capture invitation codes, magic links, local keys, or email addresses
-in public screenshots, test artifacts, or logs.
+reconstructing the old code. Use a separate browser context to open the invite,
+join with a synthetic display name, and verify the host roster and guest's
+waiting lobby. Use only a synthetic guest for recovery; manually verify the
+identity out of band and never include the one-time token in screenshots,
+logs, or artifacts. Remove that guest and confirm the removed identity cannot
+rejoin while a fresh anonymous browser can use the freed slot. Sign out the
+host and confirm its lobby is inaccessible. Do not capture invitation codes,
+recovery credentials, magic links, local keys, or email addresses in public
+screenshots, test artifacts, or logs.
 
 ## CI and review checklist
 
@@ -150,8 +218,9 @@ GitHub-hosted Ubuntu, resets from migrations without seeds, runs pgTAP tests,
 and removes its containers and volumes even after a failure. It needs no
 hosted Supabase credentials; startup output is suppressed so generated local
 keys are not put in Actions logs. A separate local-Supabase browser job tests
-the host flow without capturing sensitive invite or authentication data. The
-existing lint/type/build and landing-page Playwright jobs remain separate.
+the host/guest flow against disposable Supabase on desktop and mobile without
+capturing invitation, recovery or authentication data. The existing
+lint/type/build and landing-page Playwright jobs remain separate.
 
 Reviewers should confirm:
 
@@ -159,7 +228,7 @@ Reviewers should confirm:
 - [ ] RLS remains enabled and no browser role has table privileges or policies.
 - [ ] Participant/party/character constraints protect uniqueness and scope.
 - [ ] Invite storage contains only a verifier, not a raw join code.
-- [ ] No authored mystery content, capacity rule, or recovery mechanism was
-  introduced.
+- [ ] Capacity is limited only for Blackwood and counted transactionally;
+  recovery credentials are hashed, expiring, single-use and audited.
 - [ ] Trusted RPC grants, host checks, and safe response projections are
   reviewed independently of browser-side authorization.

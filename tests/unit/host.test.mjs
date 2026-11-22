@@ -80,12 +80,12 @@ test("each command and read verifies user before calling the privileged RPC", as
 
 test("reads use only the verified host and project allowlisted data", async () => {
   const calls = [];
-  const record = { party_id: id, status: "LOBBY", version: 0, verifier_hash: "secret", solution: "spoiler", host_principal_id: other };
+  const record = { party_id: id, status: "LOBBY", version: 0, mystery_id: "blackwood-affair", verifier_hash: "secret", solution: "spoiler", host_principal_id: other };
   const service = hostService({
     user: async () => host,
     rpc: async (name, args) => { calls.push({ name, args }); return { data: [record], error: null }; },
   });
-  assert.deepEqual(await service.get(id), { partyId: id, status: "LOBBY", version: 0 });
+  assert.deepEqual(await service.get(id), { partyId: id, status: "LOBBY", version: 0, mysteryId: "blackwood-affair" });
   assert.deepEqual(await service.list(), [{ partyId: id, status: "LOBBY", version: 0 }]);
   assert.deepEqual(calls, [
     { name: "get_host_party", args: { p_host: host, p_party_id: id } },

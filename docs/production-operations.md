@@ -28,6 +28,12 @@ After editing deployment environment variables, redeploy Production. Ensure the 
 
 - **Supabase Authentication → URL Configuration:** Site URL `https://app.onekillerparty.com`; allow the exact redirect `https://app.onekillerparty.com/auth/callback`. Do not indiscriminately allow wildcard preview domains.
 - **Provider:** Email magic-link / OTP sign-in enabled for hosts.
+- **Guest auth:** M1.5 requires Supabase anonymous sign-in. The local disposable
+  project enables it in `supabase/config.toml`; Production's Auth setting has
+  not been changed. Before releasing the reviewed M1.5 migration, obtain
+  separate owner approval and enable anonymous sign-in only for the intended
+  Production project. Do not enable it in previews unless they use an isolated,
+  disposable Supabase project.
 - **Delivery:** The owner reports custom SMTP configured in Supabase, following the Resend setup for One Killer Party. Intended dedicated sending domain: `auth.onekillerparty.com` with sender `no-reply@auth.onekillerparty.com`; **verify actual sender/domain and provider settings in the Supabase and mail-provider dashboards before relying on them**. SMTP host, username, password/API key, DNS ownership records, verified sender, and sending limits are managed in the providers' dashboards, **not in GitHub or Vercel client variables**.
 - **DNS:** Keep sender-domain SPF/DKIM records as instructed by the email provider; avoid changing inbound MX records for the apex domain unless explicitly required. Check sender-domain verification, bounce/delivery diagnostics and provider sending limits.
 - **Public host signup:** Custom SMTP enables email delivery beyond Supabase organization members, but does **not** implement guest party admission or recovery. Monitor abuse, throttling, CAPTCHA and delivery reliability before public promotion. Do not claim successful non-team-member delivery until it has been tested.
@@ -57,6 +63,45 @@ For **future** production changes:
 
 ## Current limits and unfinished work
 
-M1.4 supplies host authentication, party creation, invitation issuance/rotation and a host-safe lobby. Guest joining/recovery (M1.5), role assignment (M1.6), realtime/reconnect (M1.7) and private gameplay data are not yet available. The shareable invitation URL does not yet admit players.
+M1.4 supplies host authentication, party creation, invitation issuance/rotation and a host-safe lobby. M1.5 guest joining, lobby admission, removal and host-assisted recovery are implemented in a pending migration and application change; they are not deployed to Production, and the shareable invitation URL does not admit players there until separately approved and applied. Supabase sessions from a recovered guest's lost browser cannot be globally revoked by this app because the supported admin sign-out call requires that session's JWT; rebinding and tombstoning remove that old principal's access to the recovered participant, but its access token may remain authenticated until expiry. Role assignment (M1.6), realtime/reconnect (M1.7) and private gameplay data are not available.
 
-Production backups/restore rehearsal, retention, dedicated preview Supabase isolation, SMTP deliverability beyond owner test addresses, and public-signup abuse controls still require verification/decisions (O-025, O-029). This runbook records configuration and owner-reported results, not independent credentials inspection or permission for future production changes.
+Production backups/restore rehearsal, retention, dedicated preview Supabase isolation, SMTP deliverability beyond owner test addresses, and anonymous-signup abuse monitoring still require verification/decisions (O-025, O-029). The database-backed rate limiter is distributed across app instances, but its principal fallback and forwarded-address proxy assumptions require monitoring before public promotion. This runbook records configuration and owner-reported results, not independent credentials inspection or permission for future production changes.
+
+## Cloudflare Turnstile for Supabase Auth
+
+The existing widget uses public sitekey `0x4AAAAAAGNYu6Zb0_5s2c2h`.
+The **secret is already configured in Supabase Auth → Attack Protection**
+(owner-confirmed); do not copy that secret into GitHub or Vercel.
+
+The app displays this widget before host email magic-link requests, guest join,
+and recovery requests. The challenge token is submitted to our Next.js server
+action as `cf-turnstile-response`, then passed to Supabase's
+`signInWithOtp({ options: { captchaToken } })` or
+`signInAnonymously({ options: { captchaToken } })` when an anonymous guest
+identity must be created. **Supabase validates and consumes this token.** Do
+not also call Cloudflare Siteverify with the same token in the Next.js action.
+
+Set `NEXT_PUBLIC_TURNSTILE_SITEKEY=0x4AAAAAAGNYu6Zb0_5s2c2h` in
+Vercel Production (the source has this sitekey as a fallback).
+Confirm the existing Cloudflare widget allows `app.onekillerparty.com` and
+Supabase CAPTCHA protection is **enabled** with provider Turnstile. The
+`NEXT_PUBLIC_` sitekey is public; do not put the Turnstile secret in Vercel
+or client environment variables. Redeploy after changing public Vercel settings.
+
+**Scope:** Supabase's CAPTCHA gate protects creation of anonymous guest
+identities and host Auth OTP requests, including API calls made directly to
+Supabase. When a guest already has an anonymous session, joining/recovery
+does not call `signInAnonymously`, so the fresh widget is a UX gate rather
+than a server-side verification for those existing-session actions. Separate
+database-backed per-source rate limits still apply to joining and recovery.
+If complete Turnstile enforcement for already-authenticated guest commands
+becomes a requirement, design a **second separately verified challenge** with
+secure app-side secret storage; never reuse the token consumed by Supabase.
+
+For local integration CI, use Cloudflare's published dummy sitekey
+`1x00000000000000000000AA`, with local Supabase CAPTCHA disabled as in
+`supabase/config.toml`. This checks UI wiring and token forwarding but **does
+not test live Supabase verification**. Production smoke testing must confirm a
+real challenge succeeds for both host magic links and anonymous guest signup,
+and that a missing or invalid token is rejected by Supabase. The actual
+widget secret must never be captured in tests, PRs, or logs.
