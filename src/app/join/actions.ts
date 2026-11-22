@@ -22,13 +22,30 @@ async function sameOrigin() {
   return (await headers()).get("origin") === authConfig().origin;
 }
 
-async function guestPrincipal(captchaToken: string) {
+type PrincipalResult =
+  | { kind: "guest"; id: string }
+  | { kind: "account_conflict" }
+  | { kind: "anonymous_sign_in_failed" };
+
+async function guestPrincipal(captchaToken: string): Promise<PrincipalResult> {
   const user = await signedInUser();
-  if (user) return user.isAnonymous ? user.id : null;
+  if (user) {
+    return user.isAnonymous
+      ? { kind: "guest", id: user.id }
+      : { kind: "account_conflict" };
+  }
   const client = await authClient();
   const { data, error } = await client.auth.signInAnonymously({ options: { captchaToken } });
-  if (error || !data.user || !validPartyId(data.user.id) || data.user.is_anonymous !== true) return null;
-  return data.user.id;
+  if (error) {
+    // Categorize failures without logging captcha tokens, email, invite codes or provider detail.
+    console.warn("guest_anonymous_auth", { stage: "provider_rejected" });
+    return { kind: "anonymous_sign_in_failed" };
+  }
+  if (!data.user || !validPartyId(data.user.id) || data.user.is_anonymous !== true) {
+    console.warn("guest_anonymous_auth", { stage: "unexpected_identity" });
+    return { kind: "anonymous_sign_in_failed" };
+  }
+  return { kind: "guest", id: data.user.id };
 }
 
 function requestRateBucket(scope: string, principal: string, requestHeaders: Headers) {
@@ -49,11 +66,14 @@ export async function joinParty(_state: GuestFormState, form: FormData): Promise
     const captchaToken = captchaTokenFromForm(form);
     if (!captchaToken) return { message: "Complete human verification and try again." };
     const principal = await guestPrincipal(captchaToken);
-    if (!principal) {
+    if (principal.kind === "account_conflict") {
       return { message: "This browser has another signed-in account. Open the invitation in a separate browser context to keep that account unchanged." };
     }
+    if (principal.kind === "anonymous_sign_in_failed") {
+      return { message: "Guest sign-in was unavailable. Please refresh and retry. If this continues, contact the host." };
+    }
     const membership = await lobbyService().join(
-      principal,
+      principal.id,
       code,
       displayName,
       requestRateBucket("join", principal, await headers()),
@@ -81,8 +101,11 @@ export async function redeemRecovery(_state: GuestFormState, form: FormData): Pr
     if (!principal) {
       return { message: "This browser has another signed-in account. Open recovery in a separate browser context to keep that account unchanged." };
     }
+    if (principal.kind === "anonymous_sign_in_failed") {
+      return { message: "Guest sign-in was unavailable. Please refresh and retry. If this continues, contact the host." };
+    }
     const membership = await lobbyService().redeemRecovery(
-      principal,
+      principal.id,
       rawToken,
       requestRateBucket("recovery", principal, await headers()),
     );
