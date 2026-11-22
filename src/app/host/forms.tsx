@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { TurnstileWidget } from "../turnstile-widget";
 import {
+  assignCharacter,
   createParty,
   enrollAsPlayer,
   initiateRecovery,
@@ -118,6 +119,83 @@ export function EnrollHostForm({ partyId }: { partyId: string }) {
         <input className={field} name="displayName" required maxLength={50} />
       </label>
       <button className={button} disabled={pending}>Join as a player</button>
+      {state.message && <p role="status">{state.message}</p>}
+    </form>
+  );
+}
+
+export function AssignCharacterForm({
+  partyId,
+  version,
+  participant,
+  characters,
+  participants,
+}: {
+  partyId: string;
+  version: number;
+  participant: {
+    participantId: string;
+    assignedCharacterId: string | null;
+  };
+  characters: readonly { id: string; publicName: string; archetype: string }[];
+  participants: {
+    participantId: string;
+    displayName: string;
+    assignedCharacterId: string | null;
+  }[];
+}) {
+  const [state, action, pending] = useActionState(assignCharacter, {});
+  const [selected, setSelected] = useState(participant.assignedCharacterId ?? "");
+  const [confirmed, setConfirmed] = useState(false);
+  const replacing = participant.assignedCharacterId !== null &&
+    selected !== participant.assignedCharacterId;
+  return (
+    <form action={action} className="mt-3 space-y-2">
+      <input type="hidden" name="partyId" value={partyId} />
+      <input type="hidden" name="participantId" value={participant.participantId} />
+      <input type="hidden" name="version" value={version} />
+      <label className="block text-sm">Assigned public character
+        <select
+          className={`${field} mt-1`}
+          name="characterId"
+          value={selected}
+          onChange={(event) => {
+            setSelected(event.target.value);
+            setConfirmed(false);
+          }}
+        >
+          <option value="">Unassigned</option>
+          {characters.map((character) => {
+            const occupant = participants.find((candidate) =>
+              candidate.assignedCharacterId === character.id &&
+              candidate.participantId !== participant.participantId);
+            const current = participant.assignedCharacterId === character.id;
+            return (
+              <option key={character.id} value={character.id} disabled={!!occupant}>
+                {character.publicName} — {character.archetype}
+                {occupant ? ` (Occupied · ${occupant.displayName} · ${occupant.participantId})` :
+                  current ? " (Current assignment)" : " (Available)"}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      {replacing && (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="confirmChange"
+            value="yes"
+            checked={confirmed}
+            onChange={(event) => setConfirmed(event.target.checked)}
+            required
+          />
+          I confirm changing or clearing this assigned character.
+        </label>
+      )}
+      <button className={button} disabled={pending || (replacing && !confirmed)}>
+        Save assignment
+      </button>
       {state.message && <p role="status">{state.message}</p>}
     </form>
   );

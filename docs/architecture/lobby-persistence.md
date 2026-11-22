@@ -18,8 +18,10 @@ The migrations in `supabase/migrations/` create:
 - `party_character_refs`: only a party ID and public character ID, with no
   authored names, dossiers, or story data. The participant composite foreign
   key prevents assigning a reference that is not registered for that party.
-  The later trusted content service must validate that a public character ID
-  exists in the pinned mystery version; this migration has no content catalog.
+  M1.6 registers exactly eight public Blackwood IDs for
+  `blackwood-affair` / `first-playtest-placeholder-v1`; this remains a
+  placeholder package pin, not a claim that a complete mystery package is
+  published.
 - `invitation_credentials`: one active reusable invitation verifier per party,
   stored as a 32-byte digest with creation, revocation, and optional expiry
   metadata. There is no raw code column.
@@ -71,9 +73,29 @@ to that credential permits impersonation and must be restricted accordingly.
   safe lobby membership. `list_host_participants` returns the host-safe roster;
   host enrollment, removal, recovery issuance and redemption are separate
   commands. Invitation rotation remains compatible with M1.4.
-- **M1.6:** implement transactional assignment and optimistic version
-  conflicts, populate party character references from the pinned public
-  roster, and preserve the private-content boundary.
+- **M1.6:** `src/lib/lobby/public-characters.ts` is an immutable server-only
+  projection copied only from Blackwood public cast §2. It contains only the
+  eight playable IDs, public names, archetypes and descriptions; do not import
+  or parse `blackwood-affair.md` at runtime. The catalog explicitly accepts
+  only the existing `blackwood-affair` /
+  `first-playtest-placeholder-v1` pin. No dossier, culprit marker, solution,
+  motive, method or future content is stored or returned.
+- The M1.6 migration backfills the eight IDs for existing parties with that
+  exact pin, and registers them transactionally when the existing host-party
+  creation RPC creates a new party. It does not write story fields.
+  `assign_public_character` locks the party row, checks the host, `LOBBY`,
+  package pin, participant membership, registered public ID, uniqueness and
+  expected party version. An identical request at the current version is an
+  idempotent no-op; a changed assignment increments the version once. A
+  different existing assignment or clear requires a confirmation flag.
+  Conflicts and occupied IDs fail without changing the assignment; the
+  participant unique index remains the race backstop.
+- Host reads include only participant IDs, names, current public assignments
+  and party version. Guest reads return only the authenticated caller's own
+  public assignment. The server validates the package pin before projecting
+  catalog labels; service-role RPCs remain inaccessible to browser roles.
+  Role assignment is `LOBBY`-only. This migration adds no game-start state,
+  dossier access, clue release or solution data.
 
 Production migrations have been applied, but O-025's backup/restore, retention and isolation decisions are not fully settled. O-026 (private mystery storage) and O-027 (public story/repository policy) remain open. Do not infer that PR previews are connected to a safe dedicated Supabase project.
 
@@ -227,6 +249,13 @@ Reviewers should confirm:
 - [ ] Migrations and tests run only against a fresh local disposable database.
 - [ ] RLS remains enabled and no browser role has table privileges or policies.
 - [ ] Participant/party/character constraints protect uniqueness and scope.
+- [ ] M1.6's public catalog contains exactly the eight §2 playable IDs and no
+  private fields; party references are backfilled and new parties register
+  that same pinned roster.
+- [ ] Assignment RPC locks and checks the host, party, participant, role,
+  status and expected version; only service role can execute it.
+- [ ] Host and guest projections contain only their authorized public role
+  data; guests cannot enumerate another participant's assignment.
 - [ ] Invite storage contains only a verifier, not a raw join code.
 - [ ] Capacity is limited only for Blackwood and counted transactionally;
   recovery credentials are hashed, expiring, single-use and audited.

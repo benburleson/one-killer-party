@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { joinParty, redeemRecovery, type GuestFormState } from "./actions";
 import { ClearFragment } from "./clear-fragment";
 import { TurnstileWidget } from "../turnstile-widget";
@@ -10,13 +11,27 @@ const button = "rounded bg-amber-300 px-4 py-2 font-semibold text-gray-950 disab
 const field = "w-full rounded border border-gray-500 bg-gray-900 p-2 text-white";
 
 function WaitingLobby({ membership }: { membership: NonNullable<GuestFormState["membership"]> }) {
+  const router = useRouter();
   return (
     <section className="mt-8 space-y-3 rounded border border-gray-600 p-4" aria-label="Your guest lobby">
       <h2 className="text-xl font-semibold">You’re in the lobby</h2>
       <p>Party: {membership.partyId}</p>
       <p>Status: {membership.status}</p>
       <p>Your display name: {membership.displayName}</p>
-      <p>Waiting for the host to assign characters.</p>
+      {membership.assignedCharacter ? (
+        <article className="rounded border border-amber-300 p-3" aria-label="Your assigned public character">
+          <h3 className="text-xl font-semibold">{membership.assignedCharacter.publicName}</h3>
+          <p className="text-amber-200">{membership.assignedCharacter.archetype}</p>
+          <p>{membership.assignedCharacter.description}</p>
+        </article>
+      ) : <p>Waiting for the host to assign your character.</p>}
+      <button
+        type="button"
+        className="text-sm text-amber-300 underline"
+        onClick={() => router.refresh()}
+      >
+        Refresh assignment
+      </button>
     </section>
   );
 }

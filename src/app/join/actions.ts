@@ -15,6 +15,13 @@ export type GuestFormState = {
     displayName: string;
     status: string;
     participantCount: number;
+    assignedCharacterId: string | null;
+    assignedCharacter: {
+      id: string;
+      publicName: string;
+      archetype: string;
+      description: string;
+    } | null;
   };
 };
 
