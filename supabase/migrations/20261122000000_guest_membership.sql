@@ -404,6 +404,20 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION public.get_host_party(uuid, uuid);
+
+CREATE FUNCTION public.get_host_party(p_host uuid, p_party_id uuid)
+RETURNS TABLE (party_id uuid, status text, version integer, mystery_id text)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+  SELECT p.id, p.status, p.version, p.mystery_id
+  FROM public.parties AS p
+  WHERE p.id = p_party_id AND p.host_principal_id = p_host;
+$$;
+
 REVOKE ALL ON FUNCTION
   public.consume_lobby_rate_limit(bytea, integer, integer),
   public.join_party(uuid, bytea, text, bytea),
@@ -412,7 +426,8 @@ REVOKE ALL ON FUNCTION
   public.enroll_host_participant(uuid, uuid, text),
   public.remove_host_participant(uuid, uuid, uuid),
   public.initiate_participant_recovery(uuid, uuid, uuid, bytea, bytea),
-  public.redeem_participant_recovery(uuid, bytea, bytea)
+  public.redeem_participant_recovery(uuid, bytea, bytea),
+  public.get_host_party(uuid, uuid)
 FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION
@@ -423,5 +438,6 @@ GRANT EXECUTE ON FUNCTION
   public.enroll_host_participant(uuid, uuid, text),
   public.remove_host_participant(uuid, uuid, uuid),
   public.initiate_participant_recovery(uuid, uuid, uuid, bytea, bytea),
-  public.redeem_participant_recovery(uuid, bytea, bytea)
+  public.redeem_participant_recovery(uuid, bytea, bytea),
+  public.get_host_party(uuid, uuid)
 TO service_role;

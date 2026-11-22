@@ -15,6 +15,8 @@ INSERT INTO auth.users (id, aud, role, email, is_anonymous) VALUES
   ('00000000-0000-4000-8000-000000000208', 'authenticated', 'authenticated', NULL, true),
   ('00000000-0000-4000-8000-000000000209', 'authenticated', 'authenticated', NULL, true),
   ('00000000-0000-4000-8000-000000000210', 'authenticated', 'authenticated', NULL, true),
+  ('00000000-0000-4000-8000-000000000212', 'authenticated', 'authenticated', NULL, true),
+  ('00000000-0000-4000-8000-000000000213', 'authenticated', 'authenticated', NULL, true),
   ('00000000-0000-4000-8000-000000000211', 'authenticated', 'authenticated', 'other-host@test.invalid', false);
 
 SELECT ok(
@@ -110,6 +112,20 @@ SELECT results_eq(
   $$VALUES ('unavailable'::text)$$,
   'invalid codes fail with a generic unavailable outcome'
 );
+SELECT is(
+  (SELECT request_count FROM public.lobby_rate_limits
+   WHERE bucket_hash = decode(repeat('24', 32), 'hex')),
+  1, 'invalid invite attempts are counted by the distributed rate limiter'
+);
+SELECT is(
+  (SELECT pg_catalog.bool_and(joined.outcome = 'unavailable')
+   FROM pg_catalog.generate_series(1, 20) AS attempts
+   CROSS JOIN LATERAL public.join_party(
+     '00000000-0000-4000-8000-000000000204',
+     decode(repeat('99', 32), 'hex'), 'Alex',
+     decode(repeat('24', 32), 'hex')) AS joined),
+  true, 'invalid attempts remain generically unavailable after the rate limit'
+);
 
 SELECT results_eq(
   $$SELECT outcome FROM public.enroll_host_participant(
@@ -134,7 +150,7 @@ SELECT results_eq(
 );
 
 SELECT results_eq(
-  $$SELECT outcome FROM public.join_party('00000000-0000-4000-8000-000000000204', decode(repeat('11',32),'hex'), 'Guest 3', decode(repeat('24',32),'hex'))$$,
+  $$SELECT outcome FROM public.join_party('00000000-0000-4000-8000-000000000204', decode(repeat('11',32),'hex'), 'Guest 3', decode(repeat('44',32),'hex'))$$,
   $$VALUES ('joined'::text)$$, 'third guest joins');
 SELECT results_eq(
   $$SELECT outcome FROM public.join_party('00000000-0000-4000-8000-000000000205', decode(repeat('11',32),'hex'), 'Guest 4', decode(repeat('25',32),'hex'))$$,
@@ -233,10 +249,70 @@ SELECT results_eq(
   'single-use recovery credential cannot be replayed'
 );
 SELECT is(
+  public.initiate_participant_recovery(
+    '00000000-0000-4000-8000-000000000201',
+    '10000000-0000-4000-8000-000000000201',
+    (SELECT id FROM public.participants
+     WHERE party_id = '10000000-0000-4000-8000-000000000201'
+       AND principal_id = '00000000-0000-4000-8000-000000000210'),
+    decode(repeat('dd', 32), 'hex'),
+    decode(repeat('36', 32), 'hex')),
+  true, 'host can initiate a subsequent recovery'
+);
+SELECT is(
+  public.initiate_participant_recovery(
+    '00000000-0000-4000-8000-000000000201',
+    '10000000-0000-4000-8000-000000000201',
+    (SELECT id FROM public.participants
+     WHERE party_id = '10000000-0000-4000-8000-000000000201'
+       AND principal_id = '00000000-0000-4000-8000-000000000210'),
+    decode(repeat('ee', 32), 'hex'),
+    decode(repeat('37', 32), 'hex')),
+  true, 'new recovery issuance revokes the previous outstanding token'
+);
+SELECT results_eq(
+  $$SELECT outcome FROM public.redeem_participant_recovery(
+    '00000000-0000-4000-8000-000000000212',
+    decode(repeat('dd', 32), 'hex'),
+    decode(repeat('38', 32), 'hex'))$$,
+  $$VALUES ('unavailable'::text)$$,
+  'revoked recovery credential fails generically'
+);
+SELECT results_eq(
+  $$SELECT outcome FROM public.redeem_participant_recovery(
+    '00000000-0000-4000-8000-000000000212',
+    decode(repeat('ee', 32), 'hex'),
+    decode(repeat('39', 32), 'hex'))$$,
+  $$VALUES ('recovered'::text)$$,
+  'replacement recovery token reclaims the same participant'
+);
+SELECT is(
+  public.initiate_participant_recovery(
+    '00000000-0000-4000-8000-000000000201',
+    '10000000-0000-4000-8000-000000000201',
+    (SELECT id FROM public.participants
+     WHERE party_id = '10000000-0000-4000-8000-000000000201'
+       AND principal_id = '00000000-0000-4000-8000-000000000204'),
+    decode(repeat('ff', 32), 'hex'),
+    decode(repeat('40', 32), 'hex')),
+  true, 'host can initiate recovery for another current member'
+);
+UPDATE public.participant_recovery_tokens
+SET expires_at = now() - interval '1 second'
+WHERE verifier_hash = decode(repeat('ff', 32), 'hex');
+SELECT results_eq(
+  $$SELECT outcome FROM public.redeem_participant_recovery(
+    '00000000-0000-4000-8000-000000000213',
+    decode(repeat('ff', 32), 'hex'),
+    decode(repeat('41', 32), 'hex'))$$,
+  $$VALUES ('unavailable'::text)$$,
+  'expired recovery credential fails generically'
+);
+SELECT is(
   (SELECT count(*)::integer FROM public.participant_recovery_audit
    WHERE party_id = '10000000-0000-4000-8000-000000000201'
      AND event IN ('initiated', 'consumed', 'removed')),
-  3, 'recovery and removal create nonsecret audit entries'
+  7, 'recovery and removal create nonsecret audit entries'
 );
 SELECT is(
   (SELECT count(*)::integer FROM public.participant_recovery_tokens
@@ -245,7 +321,7 @@ SELECT is(
   1, 'only a verifier, not the bearer credential, is stored after redemption'
 );
 SELECT is(
-  (SELECT count(*)::integer FROM public.get_guest_membership('00000000-0000-4000-8000-000000000210')),
+  (SELECT count(*)::integer FROM public.get_guest_membership('00000000-0000-4000-8000-000000000212')),
   1, 'recovered principal reads only its own membership projection'
 );
 SELECT is(

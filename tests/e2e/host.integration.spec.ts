@@ -141,14 +141,28 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await alexRow.getByRole("button", { name: "Start guest recovery" }).click();
     const recoveryToken = await alexRow.getByTestId("recovery-credential").textContent();
     if (!recoveryToken) throw new Error("Recovery credential unavailable");
-    const recoveredContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
-    guestContexts.push(recoveredContext);
-    const recoveredPage = await recoveredContext.newPage();
-    await recoveredPage.goto("/join");
-    await recoveredPage.getByLabel("Recovery credential").fill(recoveryToken);
-    await recoveredPage.getByRole("button", { name: "Recover membership" }).click();
-    await expect(recoveredPage.getByText("Your display name: Alex Guest")).toBeVisible();
-    await expect(recoveredPage.getByRole("button", { name: "Recover membership" })).toHaveCount(0);
+    const recoveryContexts = await Promise.all([
+      browser.newContext({ baseURL: "http://127.0.0.1:3000" }),
+      browser.newContext({ baseURL: "http://127.0.0.1:3000" }),
+    ]);
+    guestContexts.push(...recoveryContexts);
+    const recoveryPages = await Promise.all(recoveryContexts.map((context) => context.newPage()));
+    for (const recoveryPage of recoveryPages) {
+      await recoveryPage.goto("/join");
+      await recoveryPage.getByLabel("Recovery credential").fill(recoveryToken);
+    }
+    await Promise.all(recoveryPages.map((recoveryPage) =>
+      recoveryPage.getByRole("button", { name: "Recover membership" }).click()));
+    await expect.poll(async () => {
+      const outcomes = await Promise.all(recoveryPages.map(async (recoveryPage) => ({
+        recovered: await recoveryPage.getByText("Your display name: Alex Guest").count(),
+        rejected: await recoveryPage.getByText("Recovery could not be completed. Ask the host to verify your identity and issue a new credential.").count(),
+      })));
+      return outcomes.reduce((sum, outcome) => sum + outcome.recovered, 0) === 1 &&
+        outcomes.reduce((sum, outcome) => sum + outcome.rejected, 0) === 1;
+    }).toBe(true);
+    const recoveredPage = await recoveryPages[0].getByText("Your display name: Alex Guest").count() === 1
+      ? recoveryPages[0] : recoveryPages[1];
     await guestPage.reload();
     await expect(guestPage.getByLabel("Eight-character invitation code")).toBeVisible();
     await guestPage.getByLabel("Eight-character invitation code").fill(code);

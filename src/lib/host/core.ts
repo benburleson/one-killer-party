@@ -87,16 +87,22 @@ type Dependencies = {
   rpc: (name: string, args: Record<string, string | number>) => Promise<RpcResult>;
   code?: () => string;
 };
-export type Party = { partyId: string; status: string; version: number };
+export type Party = { partyId: string; status: string; version: number; mysteryId?: string };
 export type IssueResult = { kind: "issued"; partyId: string; code: string } |
   { kind: "existing"; partyId: string } | { kind: "unavailable" };
 
-function party(row: unknown): Party | null {
+function party(row: unknown, includeMystery = false): Party | null {
   if (!row || typeof row !== "object") return null;
   const r = row as Record<string, unknown>;
   if (!validPartyId(r.party_id) || r.status !== "LOBBY" ||
-      typeof r.version !== "number" || !Number.isSafeInteger(r.version) || r.version < 0) return null;
-  return { partyId: r.party_id, status: r.status, version: r.version };
+      typeof r.version !== "number" || !Number.isSafeInteger(r.version) || r.version < 0 ||
+      (includeMystery && typeof r.mystery_id !== "string")) return null;
+  return {
+    partyId: r.party_id,
+    status: r.status,
+    version: r.version,
+    ...(includeMystery ? { mysteryId: r.mystery_id as string } : {}),
+  };
 }
 
 export function hostService(deps: Dependencies) {
@@ -110,7 +116,7 @@ export function hostService(deps: Dependencies) {
       const host = await verifiedUser();
       const { data, error } = await deps.rpc("list_host_parties", { p_host: host });
       if (error || !Array.isArray(data)) throw new Error("Unavailable");
-      const rows = data.map(party);
+      const rows = data.map((row) => party(row));
       if (rows.some((row) => row === null)) throw new Error("Unavailable");
       return rows as Party[];
     },
@@ -120,7 +126,7 @@ export function hostService(deps: Dependencies) {
       const { data, error } = await deps.rpc("get_host_party", { p_host: host, p_party_id: id });
       if (error || !Array.isArray(data) || data.length > 1) throw new Error("Unavailable");
       if (!data.length) return null;
-      const result = party(data[0]);
+      const result = party(data[0], true);
       if (!result || result.partyId !== id) throw new Error("Unavailable");
       return result;
     },
