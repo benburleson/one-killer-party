@@ -58,7 +58,7 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
             <p className="font-semibold">{participant.displayName}{participant.isHost ? " (host)" : ""}</p>
             <p className="break-all font-mono text-sm text-gray-300">Participant ID: {participant.participantId}</p>
             <AssignCharacterForm
-              key={`${participant.participantId}:${participant.assignedCharacterId ?? ""}`}
+              key={participant.participantId}
               partyId={party.partyId}
               version={roster.version}
               participant={participant}
