@@ -1,5 +1,46 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+
+// Local Supabase has CAPTCHA disabled; emulate only Cloudflare's browser-side
+// widget/token issuance. This isolates the guest recovery race test from external
+// challenge script latency, without mocking Supabase, HTTP auth or database RPCs.
+// The dummy token is public and never a production credential.
+const localTurnstileScript = `
+(() => {
+  const active = new Map();
+  let nextId = 0;
+  const dummy = "XXXX.DUMMY.TOKEN.XXXX";
+  window.turnstile = {
+    render(element, options) {
+      const id = String(++nextId);
+      active.set(id, options);
+      element.setAttribute("data-test-turnstile", options.action || "");
+      queueMicrotask(() => { if (active.has(id)) options.callback(dummy); });
+      return id;
+    },
+    reset(id) {
+      const options = active.get(id);
+      if (options) queueMicrotask(() => { if (active.has(id)) options.callback(dummy); });
+    },
+    remove(id) { active.delete(id); },
+  };
+})();
+`;
+
+async function configureTurnstile(context: BrowserContext) {
+  await context.route("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: localTurnstileScript,
+    });
+  });
+}
+async function newTestContext(browser: Browser) {
+  const context = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+  await configureTurnstile(context);
+  return context;
+}
 
 // The local mail capture service (Mailpit in the current Supabase CLI) and
 // GoTrue are disposable. Never include message bodies or links in test output.
@@ -50,6 +91,7 @@ async function signIn(page: Page) {
 }
 
 test("local host sign-in, party access, isolation and sign-out", async ({ page, browser }, testInfo) => {
+  await configureTurnstile(page.context());
   let stage = "sign-in screen";
   const guestContexts: BrowserContext[] = [];
   try {
@@ -95,7 +137,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(page.getByRole("region", { name: "New invite" })).toHaveCount(0);
 
     stage = "host B isolation";
-    const other = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    const other = await newTestContext(browser);
     try {
       const otherPage = await other.newPage();
       await signIn(otherPage);
@@ -108,7 +150,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     }
 
     const makeGuest = async (displayName: string, code: string) => {
-      const context = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+      const context = await newTestContext(browser);
       guestContexts.push(context);
       const guestPage = await context.newPage();
       await guestPage.goto("/join");
@@ -119,7 +161,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     };
 
     stage = "invite fragment and first guest admission";
-    const guestContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    const guestContext = await newTestContext(browser);
     guestContexts.push(guestContext);
     const guestPage = await guestContext.newPage();
     const guestRequestUrls: string[] = [];
@@ -162,7 +204,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       path: testInfo.outputPath("guest-session-preserved.png"),
       fullPage: true,
     });
-    const hostLoginContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    const hostLoginContext = await newTestContext(browser);
     guestContexts.push(hostLoginContext);
     const hostLoginPage = await hostLoginContext.newPage();
     const hostMagicLink = await requestMagicLink(hostLoginPage);
@@ -174,14 +216,15 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(guestPage.getByText("Your display name: Alex Guest")).toBeVisible();
 
     await page.goto(partyPath);
-    stage = "host-assisted session recovery";
+    stage = "host-assisted recovery initiation";
     await alexRow.getByLabel("I have deliberately confirmed this guest’s identity out of band.").check();
     await alexRow.getByRole("button", { name: "Start guest recovery" }).click();
     const recoveryToken = await alexRow.getByTestId("recovery-credential").textContent();
     if (!recoveryToken) throw new Error("Recovery credential unavailable");
+    stage = "host-assisted recovery browser setup";
     const recoveryContexts = await Promise.all([
-      browser.newContext({ baseURL: "http://127.0.0.1:3000" }),
-      browser.newContext({ baseURL: "http://127.0.0.1:3000" }),
+      newTestContext(browser),
+      newTestContext(browser),
     ]);
     guestContexts.push(...recoveryContexts);
     const recoveryPages = await Promise.all(recoveryContexts.map((context) => context.newPage()));
@@ -189,8 +232,10 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       await recoveryPage.goto("/join");
       await recoveryPage.getByLabel("Recovery credential").fill(recoveryToken);
     }
+    stage = "host-assisted recovery challenge and submission";
     await Promise.all(recoveryPages.map((recoveryPage) =>
       verifiedSubmit(recoveryPage, "Recover membership")));
+    stage = "host-assisted recovery single-use outcome";
     await expect.poll(async () => {
       const outcomes = await Promise.all(recoveryPages.map(async (recoveryPage) => ({
         recovered: await recoveryPage.getByText("Your display name: Alex Guest").count(),
@@ -201,6 +246,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     }).toBe(true);
     const recoveredPage = await recoveryPages[0].getByText("Your display name: Alex Guest").count() === 1
       ? recoveryPages[0] : recoveryPages[1];
+    stage = "host-assisted recovery old principal isolation";
     await guestPage.reload();
     await expect(guestPage.getByLabel("Eight-character invitation code")).toBeVisible();
     await guestPage.getByLabel("Eight-character invitation code").fill(code);
@@ -227,8 +273,8 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     for (let index = 1; index <= 6; index++) {
       fillers.push(await makeGuest(`Guest ${index}`, code));
     }
-    const finalOneContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
-    const finalTwoContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+    const finalOneContext = await newTestContext(browser);
+    const finalTwoContext = await newTestContext(browser);
     guestContexts.push(finalOneContext, finalTwoContext);
     const finalOne = await finalOneContext.newPage();
     const finalTwo = await finalTwoContext.newPage();
