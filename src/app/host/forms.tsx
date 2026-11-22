@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { TurnstileWidget } from "../turnstile-widget";
 import {
   createParty,
   enrollAsPlayer,
@@ -17,12 +18,14 @@ const field = "w-full rounded border border-gray-500 bg-gray-900 p-2 text-white"
 
 export function SignInForm() {
   const [state, action, pending] = useActionState(signIn, {});
+  const [verified, setVerified] = useState(false);
   return (
     <form action={action} className="mt-6 space-y-4">
       <label className="block">Email address
         <input className={field} name="email" type="email" autoComplete="email" required maxLength={254} />
       </label>
-      <button className={button} disabled={pending}>Send sign-in link</button>
+      <TurnstileWidget action="host_login" pending={pending} onVerifiedChange={setVerified} />
+      <button className={button} disabled={pending || !verified}>Send sign-in link</button>
       {state.message && <p role="status">{state.message}</p>}
     </form>
   );

@@ -8,6 +8,7 @@ import { originMismatchDetails, safeAuthErrorDetails, validEmail, type IssueResu
 import { service } from "@/lib/host/service";
 import { lobbyService } from "@/lib/lobby/service";
 import { rateBucketHash } from "@/lib/lobby/service";
+import { captchaTokenFromForm } from "@/lib/turnstile-token";
 
 async function sameOrigin() {
   const origin = (await headers()).get("origin");
@@ -36,10 +37,12 @@ export async function signIn(_state: FormState, form: FormData): Promise<FormSta
       console.warn("host_magic_link", { stage: "invalid_email_format" });
       return neutralResponse;
     }
+    const captchaToken = captchaTokenFromForm(form);
+    if (!captchaToken) return neutralResponse;
     const client = await authClient();
     const { error } = await client.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: `${authConfig().origin}/auth/callback` },
+      options: { emailRedirectTo: `${authConfig().origin}/auth/callback`, captchaToken },
     });
     if (error) {
       console.warn("host_magic_link", {

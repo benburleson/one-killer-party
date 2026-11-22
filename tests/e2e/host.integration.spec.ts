@@ -3,11 +3,16 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 // The local mail capture service (Mailpit in the current Supabase CLI) and
 // GoTrue are disposable. Never include message bodies or links in test output.
+async function verifiedSubmit(page: Page, label: string) {
+  await expect(page.getByRole("button", { name: label })).toBeEnabled({ timeout: 30000 });
+  await page.getByRole("button", { name: label }).click();
+}
+
 async function requestMagicLink(page: Page) {
   const mailbox = `host-${randomUUID()}`;
   await page.goto("/host");
   await page.getByLabel("Email address").fill(`${mailbox}@example.test`);
-  await page.getByRole("button", { name: "Send sign-in link" }).click();
+  await verifiedSubmit(page, "Send sign-in link");
   await expect(page.getByText("If sign-in is available, check your email for a link.")).toBeVisible();
 
   let link: string | undefined;
@@ -109,7 +114,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       await guestPage.goto("/join");
       await guestPage.getByLabel("Eight-character invitation code").fill(code);
       await guestPage.getByLabel("Your display name").fill(displayName);
-      await guestPage.getByRole("button", { name: "Join party" }).click();
+      await verifiedSubmit(guestPage, "Join party");
       return guestPage;
     };
 
@@ -123,7 +128,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(guestPage.getByLabel("Eight-character invitation code")).toHaveValue(code);
     await expect.poll(() => guestPage.evaluate(() => window.location.hash)).toBe("");
     await guestPage.getByLabel("Your display name").fill("Alex Guest");
-    await guestPage.getByRole("button", { name: "Join party" }).click();
+    await verifiedSubmit(guestPage, "Join party");
     await expect(guestPage.getByText("Your display name: Alex Guest")).toBeVisible();
     await guestPage.screenshot({
       path: testInfo.outputPath("guest-waiting-lobby.png"),
@@ -185,7 +190,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       await recoveryPage.getByLabel("Recovery credential").fill(recoveryToken);
     }
     await Promise.all(recoveryPages.map((recoveryPage) =>
-      recoveryPage.getByRole("button", { name: "Recover membership" }).click()));
+      verifiedSubmit(recoveryPage, "Recover membership")));
     await expect.poll(async () => {
       const outcomes = await Promise.all(recoveryPages.map(async (recoveryPage) => ({
         recovered: await recoveryPage.getByText("Your display name: Alex Guest").count(),
@@ -200,7 +205,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(guestPage.getByLabel("Eight-character invitation code")).toBeVisible();
     await guestPage.getByLabel("Eight-character invitation code").fill(code);
     await guestPage.getByLabel("Your display name").fill("Alex Guest");
-    await guestPage.getByRole("button", { name: "Join party" }).click();
+    await verifiedSubmit(guestPage, "Join party");
     await expect(guestPage.getByText("That invitation could not be used. Check the code or ask the host for help.")).toBeVisible();
 
     stage = "confirmed host removal and fresh replacement identity";
@@ -212,7 +217,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await recoveredPage.reload();
     await recoveredPage.getByLabel("Eight-character invitation code").fill(code);
     await recoveredPage.getByLabel("Your display name").fill("Alex Guest");
-    await recoveredPage.getByRole("button", { name: "Join party" }).click();
+    await verifiedSubmit(recoveredPage, "Join party");
     await expect(recoveredPage.getByText("That invitation could not be used. Check the code or ask the host for help.")).toBeVisible();
     const replacementPage = await makeGuest("Replacement", code);
     await expect(replacementPage.getByText("Your display name: Replacement")).toBeVisible();
@@ -233,8 +238,8 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       await finalPage.getByLabel("Your display name").fill("Last slot");
     }
     await Promise.all([
-      finalOne.getByRole("button", { name: "Join party" }).click(),
-      finalTwo.getByRole("button", { name: "Join party" }).click(),
+      verifiedSubmit(finalOne, "Join party"),
+      verifiedSubmit(finalTwo, "Join party"),
     ]);
     await expect.poll(async () => {
       const joinedCount = await Promise.all([finalOne, finalTwo].map((finalPage) =>

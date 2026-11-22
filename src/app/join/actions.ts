@@ -5,6 +5,7 @@ import { authClient, authConfig } from "@/lib/host/auth";
 import { validPartyId } from "@/lib/host/core";
 import { lobbyService, rateBucketHash, signedInUser } from "@/lib/lobby/service";
 import { normalizeDisplayName, normalizeInvitationCode } from "@/lib/lobby/core";
+import { captchaTokenFromForm } from "@/lib/turnstile-token";
 
 export type GuestFormState = {
   message?: string;
@@ -21,11 +22,11 @@ async function sameOrigin() {
   return (await headers()).get("origin") === authConfig().origin;
 }
 
-async function guestPrincipal() {
+async function guestPrincipal(captchaToken: string) {
   const user = await signedInUser();
   if (user) return user.isAnonymous ? user.id : null;
   const client = await authClient();
-  const { data, error } = await client.auth.signInAnonymously();
+  const { data, error } = await client.auth.signInAnonymously({ options: { captchaToken } });
   if (error || !data.user || !validPartyId(data.user.id) || data.user.is_anonymous !== true) return null;
   return data.user.id;
 }
@@ -45,7 +46,9 @@ export async function joinParty(_state: GuestFormState, form: FormData): Promise
       return { message: "Enter the eight-character code and a display name." };
     }
 
-    const principal = await guestPrincipal();
+    const captchaToken = captchaTokenFromForm(form);
+    if (!captchaToken) return { message: "Complete human verification and try again." };
+    const principal = await guestPrincipal(captchaToken);
     if (!principal) {
       return { message: "This browser has another signed-in account. Open the invitation in a separate browser context to keep that account unchanged." };
     }
@@ -72,7 +75,9 @@ export async function redeemRecovery(_state: GuestFormState, form: FormData): Pr
     if (typeof rawToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(rawToken)) {
       return { message: "Recovery could not be completed. Ask the host for help." };
     }
-    const principal = await guestPrincipal();
+    const captchaToken = captchaTokenFromForm(form);
+    if (!captchaToken) return { message: "Complete human verification and try again." };
+    const principal = await guestPrincipal(captchaToken);
     if (!principal) {
       return { message: "This browser has another signed-in account. Open recovery in a separate browser context to keep that account unchanged." };
     }

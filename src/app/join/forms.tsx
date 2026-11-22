@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { joinParty, redeemRecovery, type GuestFormState } from "./actions";
 import { ClearFragment } from "./clear-fragment";
+import { TurnstileWidget } from "../turnstile-widget";
 
 const button = "rounded bg-amber-300 px-4 py-2 font-semibold text-gray-950 disabled:opacity-50";
 const field = "w-full rounded border border-gray-500 bg-gray-900 p-2 text-white";
@@ -29,6 +30,7 @@ function JoinForm({
   onJoined: (membership: NonNullable<GuestFormState["membership"]>) => void;
 }) {
   const [state, action, pending] = useActionState(joinParty, {});
+  const [verified, setVerified] = useState(false);
   useEffect(() => {
     if (state.membership) {
       setCode("");
@@ -55,7 +57,8 @@ function JoinForm({
           <label className="block">Your display name
             <input className={field} name="displayName" autoComplete="nickname" maxLength={50} required />
           </label>
-          <button className={button} disabled={pending}>Join party</button>
+          <TurnstileWidget action="guest_join" pending={pending} onVerifiedChange={setVerified} />
+          <button className={button} disabled={pending || !verified}>Join party</button>
           {state.message && <p role="status">{state.message}</p>}
         </form>
       )}
@@ -69,6 +72,7 @@ function RecoveryForm({
   onRecovered: (membership: NonNullable<GuestFormState["membership"]>) => void;
 }) {
   const [state, action, pending] = useActionState(redeemRecovery, {});
+  const [verified, setVerified] = useState(false);
   const [token, setToken] = useState("");
   useEffect(() => {
     if (state.membership) onRecovered(state.membership);
@@ -89,7 +93,8 @@ function RecoveryForm({
           required
         />
       </label>
-      <button className={button} disabled={pending}>Recover membership</button>
+      <TurnstileWidget action="guest_recovery" pending={pending} onVerifiedChange={setVerified} />
+      <button className={button} disabled={pending || !verified}>Recover membership</button>
       {state.message && <p role="status">{state.message}</p>}
     </form>
   );

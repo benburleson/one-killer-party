@@ -161,6 +161,7 @@ jobs:
             `NEXT_PUBLIC_SUPABASE_ANON_KEY=${status.ANON_KEY}`,
             `SUPABASE_SERVICE_ROLE_KEY=${status.SERVICE_ROLE_KEY}`,
             "PLAYWRIGHT_LOCAL_SUPABASE=1",
+            "NEXT_PUBLIC_TURNSTILE_SITEKEY=1x00000000000000000000AA",
             "",
           ].join("\n"));
           NODE
