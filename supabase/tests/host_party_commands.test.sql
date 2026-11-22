@@ -45,8 +45,8 @@ SELECT is(
 );
 SELECT is(
   (SELECT proargnames FROM pg_catalog.pg_proc WHERE oid = 'public.get_host_party(uuid,uuid)'::regprocedure),
-  ARRAY['p_host', 'p_party_id', 'party_id', 'status', 'version', 'mystery_id']::text[],
-  'get RPC exposes safe party metadata including the pinned package identifier'
+  ARRAY['p_host', 'p_party_id', 'party_id', 'status', 'version', 'mystery_id', 'mystery_version']::text[],
+  'get RPC exposes safe party metadata including both pinned package identifiers'
 );
 SELECT is(
   (SELECT proargnames FROM pg_catalog.pg_proc WHERE oid = 'public.list_host_parties(uuid)'::regprocedure),
@@ -140,7 +140,7 @@ SELECT results_eq(
 );
 SELECT results_eq(
   $$SELECT * FROM public.get_host_party(p_host => '00000000-0000-4000-8000-000000000101', p_party_id => '10000000-0000-4000-8000-000000000101')$$,
-  $$VALUES ('10000000-0000-4000-8000-000000000101'::uuid, 'LOBBY'::text, 0, 'blackwood-affair'::text)$$,
+  $$VALUES ('10000000-0000-4000-8000-000000000101'::uuid, 'LOBBY'::text, 0, 'blackwood-affair'::text, 'first-playtest-placeholder-v1'::text)$$,
   'host can get their party'
 );
 SELECT is(
@@ -255,7 +255,7 @@ SELECT is(
 );
 SELECT results_eq(
   $$SELECT * FROM public.get_host_party('00000000-0000-4000-8000-000000000101', '10000000-0000-4000-8000-000000000101')$$,
-  $$VALUES ('10000000-0000-4000-8000-000000000101'::uuid, 'LOBBY'::text, 2, 'blackwood-affair'::text)$$,
+  $$VALUES ('10000000-0000-4000-8000-000000000101'::uuid, 'LOBBY'::text, 2, 'blackwood-affair'::text, 'first-playtest-placeholder-v1'::text)$$,
   'successful second rotation exposes the new version to the host'
 );
 RESET ROLE;

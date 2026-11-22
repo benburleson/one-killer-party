@@ -213,6 +213,10 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await alexRow.getByLabel("Assigned public character").selectOption("vivienne");
     await alexRow.getByRole("button", { name: "Save assignment" }).click();
     await expect(alexRow.getByRole("status")).toContainText("Character assignment updated.");
+    await expect(
+      page.getByRole("list", { name: "Public character roster" })
+        .getByRole("listitem").filter({ hasText: "Vivienne Blackwood" }),
+    ).toContainText("Assigned to Alex Guest");
     await staleAlexRow.getByLabel("Assigned public character").selectOption("margot");
     await staleAlexRow.getByRole("button", { name: "Save assignment" }).click();
     await expect(staleAlexRow.getByRole("status"))

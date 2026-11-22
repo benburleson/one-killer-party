@@ -58,6 +58,32 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION public.get_host_party(uuid, uuid);
+
+CREATE FUNCTION public.get_host_party(p_host uuid, p_party_id uuid)
+RETURNS TABLE (
+  party_id uuid,
+  status text,
+  version integer,
+  mystery_id text,
+  mystery_version text
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+  SELECT party.id, party.status, party.version, party.mystery_id, party.mystery_version
+  FROM public.parties AS party
+  WHERE party.id = p_party_id AND party.host_principal_id = p_host;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_host_party(uuid, uuid)
+FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.get_host_party(uuid, uuid)
+TO service_role;
+
 DROP FUNCTION public.list_host_participants(uuid, uuid);
 
 CREATE FUNCTION public.list_host_participants(p_host uuid, p_party_id uuid)
