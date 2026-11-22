@@ -162,8 +162,10 @@ export async function assignCharacter(_state: LobbyActionState, form: FormData):
       version,
       form.get("confirmChange") === "yes",
     );
-    revalidatePath(`/host/${partyId}`);
     if (outcome === "changed" || outcome === "unchanged") {
+      // Refresh canonical roster only after successful assignment.
+      // A stale-version rejection must keep its local error message visible.
+      revalidatePath(`/host/${partyId}`);
       return { message: "Character assignment updated." };
     }
     if (outcome === "conflict") {
