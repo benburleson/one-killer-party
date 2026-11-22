@@ -193,7 +193,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(guestPage.getByRole("button", { name: "Join party" })).toHaveCount(0);
     await page.goto(partyPath);
     await expect(page.getByRole("heading", { name: "Players (1/8)" })).toBeVisible();
-    const alexRow = page.getByRole("listitem").filter({ hasText: "Alex Guest" });
+    const alexRow = page.getByRole("list").filter({ has: page.getByRole("button", { name: "Save assignment" }) }).getByRole("listitem").filter({ hasText: "Alex Guest" });
     await expect(alexRow.getByText(/Participant ID:/)).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("host-safe-roster.png"),
@@ -201,26 +201,34 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     });
 
     stage = "public role assignment and stale-version conflict";
+    stage = "public character roster renders eight cards";
     await expect(page.getByRole("list", { name: "Public character roster" }).getByRole("listitem"))
       .toHaveCount(8);
+    stage = "host public roster spoiler check";
     const publicRosterHtml = await page.content();
     for (const privateMarker of ["is_murderer", "isMurderer", "privateDossier", "solution"]) {
       if (publicRosterHtml.includes(privateMarker)) throw new Error("Private marker in host public roster");
     }
+    stage = "host assignment first submission";
     const staleHostPage = await page.context().newPage();
     await staleHostPage.goto(partyPath);
-    const staleAlexRow = staleHostPage.getByRole("listitem").filter({ hasText: "Alex Guest" });
+    const staleAlexRow = staleHostPage.getByRole("list").filter({ has: staleHostPage.getByRole("button", { name: "Save assignment" }) }).getByRole("listitem").filter({ hasText: "Alex Guest" });
     await alexRow.getByLabel("Assigned public character").selectOption("vivienne");
     await alexRow.getByRole("button", { name: "Save assignment" }).click();
+    stage = "host assignment confirms server result";
     await expect(alexRow.getByRole("status")).toContainText("Character assignment updated.");
+    stage = "host public roster reflects assignment";
     await expect(
       page.getByRole("list", { name: "Public character roster" })
         .getByRole("listitem").filter({ hasText: "Vivienne Blackwood" }),
     ).toContainText("Assigned to Alex Guest");
+    stage = "stale host assignment submits old version";
     await staleAlexRow.getByLabel("Assigned public character").selectOption("margot");
     await staleAlexRow.getByRole("button", { name: "Save assignment" }).click();
+    stage = "stale version is rejected";
     await expect(staleAlexRow.getByRole("status"))
       .toContainText("The party changed since this roster loaded. Refresh and retry.");
+    stage = "guest sees assigned public character after refresh";
     await guestPage.reload();
     await expect(guestPage.getByRole("heading", { name: "Vivienne Blackwood" })).toBeVisible();
     const guestPublicHtml = await guestPage.content();
