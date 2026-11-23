@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appOrigin, generateCode, hostService, hostPageUrl, originMismatchDetails, safeAuthErrorDetails, validEmail, verifiedEmailHost, verifier } from "../../src/lib/host/core.ts";
+import { appOrigin, generateCode, hostService, hostPageUrl, originMismatchDetails, parsePartyVersion, safeAuthErrorDetails, validEmail, verifiedEmailHost, verifier } from "../../src/lib/host/core.ts";
+import { normalizeInvitationCode } from "../../src/lib/lobby/invite-code.ts";
 
 const host = "a0000000-0000-4000-8000-000000000001";
 const other = "a0000000-0000-4000-8000-000000000002";
@@ -65,7 +66,11 @@ test("authentication diagnostics whitelist only safe provider error details", ()
 });
 
 test("codes use an unambiguous alphabet and SHA-256 bytea format", () => {
-  for (let i = 0; i < 100; i++) assert.match(generateCode(), /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/);
+  for (let i = 0; i < 100; i++) {
+    const code = generateCode();
+    assert.match(code, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/);
+    assert.equal(normalizeInvitationCode(code), code, "issued codes must be accepted by guest parsing");
+  }
   assert.equal(verifier("ABCDEFGH"), "\\x9ac2197d9258257b1ae8463e4214e4cd0a578bc1517f2415928b91be4283fc48");
 });
 
@@ -164,4 +169,13 @@ test("concurrent rotation results reveal only the version-checked winner", async
   const results = await Promise.all([service.rotate(id, 0), service.rotate(id, 0)]);
   assert.equal(results.filter((result) => result.kind === "issued").length, 1);
   assert.equal(results.filter((result) => result.kind === "unavailable").length, 1);
+});
+
+test("posted party versions parse only as canonical Postgres integers", () => {
+  assert.equal(parsePartyVersion("0"), 0);
+  assert.equal(parsePartyVersion("42"), 42);
+  assert.equal(parsePartyVersion("2147483647"), 2147483647);
+  for (const value of [null, undefined, 3, "", " 3", "3 ", "03", "-1", "+1", "1.0", "1e3", "0x10", "2147483648", "99999999999"]) {
+    assert.equal(parsePartyVersion(value), null, JSON.stringify(value));
+  }
 });

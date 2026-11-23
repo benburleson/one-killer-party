@@ -24,6 +24,11 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
   } catch { redirect("/host"); }
   const participants = roster.participants;
   const hostIsPlaying = participants.some((participant) => participant.isHost);
+  // Client components receive explicit allowlisted props, never whole server records.
+  const assignmentRoster = participants.map(({ participantId, displayName, assignedCharacterId }) =>
+    ({ participantId, displayName, assignedCharacterId }));
+  const characterOptions = BLACKWOOD_PUBLIC_CHARACTERS.map(({ id, publicName, archetype }) =>
+    ({ id, publicName, archetype }));
   const capacity = party.mysteryId === "blackwood-affair" ? 8 : null;
   return <>
     <div className="flex justify-between gap-4">
@@ -63,9 +68,12 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
               key={participant.participantId}
               partyId={party.partyId}
               version={roster.version}
-              participant={participant}
-              participants={participants}
-              characters={BLACKWOOD_PUBLIC_CHARACTERS}
+              participant={{
+                participantId: participant.participantId,
+                assignedCharacterId: participant.assignedCharacterId,
+              }}
+              participants={assignmentRoster}
+              characters={characterOptions}
             />
             {!participant.isHost && <>
               <RemoveParticipantForm partyId={party.partyId} participantId={participant.participantId} />

@@ -9,16 +9,24 @@ function job(name) {
 }
 
 test("local Supabase startup failures expose only categorical diagnostics", () => {
-  const starts = [...workflow.matchAll(/- name: Start disposable local Supabase\n([\s\S]*?)(?=\n      - name:)/g)];
-  assert.equal(starts.length, 2);
+  const action = readFileSync(
+    new URL("../../.github/actions/start-local-supabase/action.yml", import.meta.url), "utf8");
+  assert.match(action, /using: composite/);
+  assert.match(action, /npx supabase start >\/dev\/null 2>&1/);
+  assert.match(action, /Supabase CLI start failed \(exit code/);
+  assert.match(action, /docker info >\/dev\/null 2>&1/);
+  assert.match(action, /docker ps -a --filter 'name=one-killer-party' --format '\{\{\.Status\}\}'/);
+  assert.doesNotMatch(action, /supabase status|SERVICE_ROLE_KEY|ANON_KEY/);
+  // The shared step must stay unprivileged: no inputs, secrets, expressions or nested actions.
+  assert.doesNotMatch(action, /\$\{\{|^inputs:|secrets\.|uses:/m);
 
-  for (const [, step] of starts) {
-    assert.match(step, /npx supabase start >\/dev\/null 2>&1/);
-    assert.match(step, /Supabase CLI start failed \(exit code/);
-    assert.match(step, /docker info >\/dev\/null 2>&1/);
-    assert.match(step, /docker ps -a --filter 'name=one-killer-party' --format '\{\{\.Status\}\}'/);
-    assert.doesNotMatch(step, /supabase status|SERVICE_ROLE_KEY|ANON_KEY/);
+  for (const name of ["database-security", "browser-integration"]) {
+    assert.match(job(name),
+      /- name: Start disposable local Supabase\n        uses: \.\/\.github\/actions\/start-local-supabase\n      - name: Reset from migrations/);
   }
+  // No job starts Supabase inline, where output suppression could drift.
+  assert.doesNotMatch(workflow, /supabase start/);
+  assert.equal([...workflow.matchAll(/uses: \.\//g)].length, 2);
 });
 
 test("browser artifacts remain allowlisted and missing integration screenshots do not mask failures", () => {

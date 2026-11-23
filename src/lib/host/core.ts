@@ -7,6 +7,13 @@ export function validPartyId(value: unknown): value is string {
   return typeof value === "string" && uuid.test(value);
 }
 
+/** Parses the canonical decimal party version posted by a form; null when not a Postgres integer. */
+export function parsePartyVersion(value: unknown): number | null {
+  if (typeof value !== "string" || !/^(0|[1-9]\d{0,9})$/.test(value)) return null;
+  const version = Number(value);
+  return version <= 2147483647 ? version : null;
+}
+
 export function validEmail(value: unknown): value is string {
   return typeof value === "string" && value.length <= 254 &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);

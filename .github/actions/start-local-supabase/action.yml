@@ -1,0 +1,31 @@
+# Shared by the CI jobs that need the disposable local Supabase stack.
+# Takes no inputs, secrets or expressions and runs with the calling job's
+# permissions. Raw CLI output stays suppressed because it prints local keys;
+# failures report only categorical diagnostics.
+name: Start disposable local Supabase
+description: Start the local Supabase stack with output suppressed and categorical failure diagnostics.
+runs:
+  using: composite
+  steps:
+    - name: Start disposable local Supabase
+      shell: bash
+      run: |
+        if npx supabase start >/dev/null 2>&1; then
+          exit 0
+        else
+          exit_code=$?
+          echo "::error::Supabase CLI start failed (exit code ${exit_code}); raw output was suppressed."
+          if docker info >/dev/null 2>&1; then
+            echo "Docker daemon: reachable"
+          else
+            echo "Docker daemon: unavailable"
+          fi
+          container_states="$(docker ps -a --filter 'name=one-killer-party' --format '{{.Status}}' 2>/dev/null | head -n 12 || true)"
+          if [[ -n "$container_states" ]]; then
+            echo "Matching Supabase container states (status only):"
+            printf '%s\n' "$container_states"
+          else
+            echo "Matching Supabase container states: none reported"
+          fi
+          exit "$exit_code"
+        fi
