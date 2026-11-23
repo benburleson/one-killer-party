@@ -3,6 +3,9 @@
 **Status:** Draft data contract and validation requirements · v0.3 · 2026-11-20  
 **Related:** [Vision](product-vision.md) · [Gameplay](gameplay-specification.md) · [Flows](host-and-player-flows.md) · [Blackwood content](blackwood-affair.md) · [Decision register](decisions-and-open-questions.md)
 
+The [accepted mystery content architecture](../architecture/mystery-content-architecture.md)
+records D-026–D-028: new private packages live in private immutable object storage, party/phase/release state in Postgres, and a trusted server serves authorized projections. Existing public spoilers require a separate human-approved remediation policy (O-033).
+
 ## 1. Intent and separation
 
 **CONFIRMED direction:** Mysteries are authored, structured, versioned data interpreted by a reusable game engine. The first mystery is **a placeholder**, not an AI-generated story or a requirement for a mystery editor. The first complete playtest is **exactly eight playable characters**. The previously described 6–10 player support is a future capability without authored character variants.
@@ -11,7 +14,7 @@ This specification describes **semantic content objects**, their permissions and
 
 Separate at least four surfaces:
 
-1. **Authoring package (privileged, version-controlled):** Complete source content including solution, all role dossiers and future clues.
+1. **Authoring package (privileged, version-controlled):** Complete source content including solution, all role dossiers and future clues, **outside this public Git repository**. Approved immutable package bytes are published to a private object store.
 2. **Public metadata projection:** Safe title, synopsis, supported player count(s), duration, public character descriptions and nonspoiler event setup.
 3. **Participant projection:** Only current public content, participant's own private data and their released items.
 4. **Host operations projection:** Public roster, membership, assignments, phase, readiness and spoiler-free scripts; **not** a complete authoring package.
@@ -24,14 +27,14 @@ A `MysteryDefinition` has a stable `mysteryId` and immutable `version` (semantic
 
 **Required invariants:**
 
-- Each `party` references a specific **published immutable content version** so mid-party author edits cannot change the solution.
+- Each **playable** party references one specific **published immutable content version and digest** so mid-party author edits cannot change the solution. The current `first-playtest-placeholder-v1` parties are legacy public-roster placeholders, not private published packages, and retain their current lobby behavior.
 - Draft content may be edited; changing released/published canon produces a new version.
 - All references (character IDs, act IDs, clue IDs, objective targets, motive/method IDs) must resolve within the same package version.
 - Content may include spoiler-only fields, but these must be physically inaccessible to unauthorized guest/host-facing API/database queries.
 - Data-driven story operation must not require hardcoded Blackwood character names in rendering or core engine logic.
 - Public and private content types must have explicit release and projection rules.
 
-**Open storage decision:** Store published definitions as server-only JSON/TypeScript data, normalized Postgres rows, or a hybrid. The earlier architecture described `mysteries`, `characters`, `acts`, `clues`, `parties`, etc. as conceptual entities, not finalized migration files. Regardless of format, do not ship the full solution in a frontend source import.
+**Selected storage design (D-026):** Private immutable Supabase Storage JSON packages accessed only by a trusted server loader, with restricted Postgres registry and party/phase/release state. The conceptual table names below are not implementation-ready migrations. New private story content must never be checked into the public repo or shipped in client bundles. Preserve each party's pinned exact published version/digest (D-027). Existing placeholder parties stay in their lobby and require a new party to play an approved published private version; never repin in place. Bucket/publishing setup needs separate human approval.
 
 ## 3. Semantic entities
 
@@ -82,6 +85,7 @@ The first package needs:
 - A precommitted murderer, motive, method, fictional timeline, cover story and explanation.
 - Minimum **6 public** and **8 character-specific** content items in current draft, accurately classified by evidence/knowledge type.
 - Character-specific objectives, with no mandatory completion gates.
+- **Act I-only murderer briefing:** starting private dossiers are spoiler-safe for every character in LOBBY. The assigned murderer learns guilt/motive/method/true timeline/cover story only after a committed ACT_1 start (D-028), via a separate private role-only projection; it must not appear in public roster or pre-start packages.
 - All core clues accessible without optional discoveries or any player volunteering a secret.
 - No impossible chronology, missing references or contradiction between official documents and canonical timeline.
 
