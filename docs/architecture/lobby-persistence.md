@@ -9,6 +9,10 @@ owner-reported. See [production operations](../production-operations.md) for
 the dated rollout table and human-approved deployment procedure. All
 **automated tests** use disposable local Supabase only.
 
+For the proposed boundary between lobby state and future private content, see
+[mystery content architecture](mystery-content-architecture.md); it does not
+change the current lobby or authorize publication.
+
 ## Schema boundary
 
 The migrations in `supabase/migrations/` create:

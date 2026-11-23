@@ -74,6 +74,7 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 | `P-022` | A guest uses app only ~5–10 minutes in a 90-minute party | An experiment target, not observed or enforceable |
 | `P-023` | Host setup under 10 minutes | An experiment target, not observed |
 | `P-024` | Public repo eventually to showcase technical and AI-augmented workflow abilities | Visibility date, asset/license/public content strategy OPEN |
+| `P-025` | Hybrid server-only versioned package and database release state for the first prototype | [Proposed ADR](../architecture/mystery-content-architecture.md); O-026/O-027 and publication/source policy remain open pending owner review |
 
 ## 4. Open questions — prioritize before engineering work
 

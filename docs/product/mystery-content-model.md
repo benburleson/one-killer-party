@@ -3,6 +3,10 @@
 **Status:** Draft data contract and validation requirements · v0.3 · 2026-11-20  
 **Related:** [Vision](product-vision.md) · [Gameplay](gameplay-specification.md) · [Flows](host-and-player-flows.md) · [Blackwood content](blackwood-affair.md) · [Decision register](decisions-and-open-questions.md)
 
+The [proposed mystery content ADR](../architecture/mystery-content-architecture.md)
+details implementation boundaries and tradeoffs; storage and source visibility
+remain open pending owner review.
+
 ## 1. Intent and separation
 
 **CONFIRMED direction:** Mysteries are authored, structured, versioned data interpreted by a reusable game engine. The first mystery is **a placeholder**, not an AI-generated story or a requirement for a mystery editor. The first complete playtest is **exactly eight playable characters**. The previously described 6–10 player support is a future capability without authored character variants.
