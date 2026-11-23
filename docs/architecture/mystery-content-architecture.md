@@ -143,7 +143,11 @@ unreviewed data. Verify digest over a defined canonical serialization of the
 complete package excluding the digest field itself. Check public fields for
 spoilers and review evidence classification, chronology, core clue coverage,
 and solvability independently of optional missions; automated validation alone
-cannot establish editorial truth or secrecy.
+cannot establish editorial truth or secrecy. The server-side package validator
+owns these content checks and runs on import and as a publication gate; each
+deployment must also verify the registered bytes and digest before serving a
+version. Database constraints independently enforce pin and publication
+integrity, not editorial validation.
 
 A draft is mutable only before publication. Publication requires validation,
 editorial and owner approval, an immutable unique `(mysteryId, version)` and
@@ -188,6 +192,11 @@ version supplied by the browser as authority.
 | Owning host, not enrolled | Roster / host ops | Deny | Public / deny private | Only after reveal |
 | Owning host, enrolled and assigned | Roster / host ops | Own only, including lobby | Public / own, after each committed release | Only after reveal |
 | Authenticated non-owner, non-member | Deny party reads | Deny | Deny | Deny |
+
+Even for a playing host, `getHostOperations` remains spoiler-free; the host
+obtains their own dossier only through the separate participant-authorized
+read. Neither host ownership nor a participant assignment expands the other
+projection's privileges.
 
 No phase check is satisfied by a URL, local clock, navigation, or mission
 completion. `LOBBY` has no released act items; `ACT_1`–`ACT_3` expose only
@@ -270,8 +279,9 @@ separate.
    using synthetic fixtures, no real private publication. Specify published
    version/pin constraints in a reviewed migration if needed; retain placeholder
    behavior. Acceptance: validation rejects invalid references/counts/phases
-   and mutations, bundles/responses exclude synthetic secrets, old pins fail
-   closed. Unit tests, build/chunk checks and local pgTAP for any migration.
+   and mutations, host-only projections, logs, bundles and responses exclude
+   synthetic dossiers, future text and solution, and old pins fail closed.
+   Unit tests, build/chunk checks and local pgTAP for any migration.
 2. **Own pre-start dossier:** After editorial approval of starting content and
    release timing, add server reads and UI for assigned participants only,
    including playing host. Add necessary version/digest and authorization RPC
@@ -280,9 +290,12 @@ separate.
    local Supabase and desktop/mobile Playwright. No start-game behavior.
 3. **Start and Act I:** After readiness and Act I content approval, extend
    `LOBBY`-only schema with reviewed phase/release state and atomic idempotent
-   host transition. Acceptance: exactly-eight readiness, no pre-start Act I
-   leakage, concurrent/replayed transitions and public/private release
-   isolation tested with pgTAP and browser integration. No mission gate.
+   host transition. Proposed minimum readiness: eight distinct current enrolled
+   participants each assigned a different one of the eight roles, including the
+   host only if enrolled; any additional readiness conditions need owner review.
+   Acceptance: that minimum, no pre-start Act I leakage, concurrent/replayed
+   transitions and public/private release isolation tested with pgTAP and
+   browser integration. No mission gate.
 4. **Later acts and reveal:** Separate small issues for each authorized phase
    and eventually reveal, after relevant content, accusation/lock and transition
    decisions are approved. Extend transition constraints and tests per slice;
