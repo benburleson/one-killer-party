@@ -1,9 +1,15 @@
 # ADR-0001: Lobby authentication and persistence
 
-**Status: Partially approved — D-020–D-025 confirmed; infrastructure/content decisions remain open**
+**Status: Accepted and implemented for the lobby (D-020–D-025). Historical decision record.**
 
-The M1.3 schema boundary, local commands, and deliberate no-browser-access
-policy are documented in [Lobby persistence and local database](lobby-persistence.md).
+This ADR is kept for its options, rationale and threat model. Its milestone
+labels (M1.3–M1.7) and "awaiting approval" wording describe the state when it
+was written. Current behavior is in [lobby persistence](lobby-persistence.md);
+private-content storage (O-026, O-027) was later decided in
+[mystery content architecture](mystery-content-architecture.md) (D-026–D-028);
+production status is in [production operations](../production-operations.md).
+The lobby synchronizes by authenticated polling; the Realtime design in §7
+was not built.
 
 ## Product-owner decisions recorded 2026-11-20
 
@@ -16,7 +22,7 @@ The following decisions are now **CONFIRMED** in [the decision register](../prod
 - `D-024 / O-004`: one reusable party invitation link and equivalent eight-character human-readable code valid while lobby admission is open; host may revoke/regenerate. Cryptographically strong random generation, verifiers, rate limits and generic failures mandatory; distinct single-use recovery tokens.
 - `D-025 / O-004,O-005`: exactly eight playable Blackwood slots; host counts only if playing; duplicate display names allowed with host-side disambiguation; before start host may remove/replace participants and change assignments with confirmation. After start no new participants or ordinary role changes, but existing members can reconnect or use approved recovery.
 
-Still **OPEN**: O-025 environment/operations authorization; O-026 content storage; O-027 public story disclosure. The exact invitation alphabet, abuse thresholds, session revocation and recovery credential mechanics require secure implementation and testing, but the policy in D-024/D-025 is confirmed. A shared multi-guest party invite must not be confused with a single-use participant recovery credential.
+Still **OPEN**: O-025 backup, retention and preview isolation; O-033 existing public spoiler history. O-026 and the future-source part of O-027 are resolved by D-026. The exact invitation alphabet, abuse thresholds, session revocation and recovery credential mechanics require secure implementation and testing, but the policy in D-024/D-025 is confirmed. A shared multi-guest party invite must not be confused with a single-use participant recovery credential.
 
 This ADR proposes a security and persistence boundary for the multiplayer
 lobby. It does not approve any open product decision, define a migration, or
@@ -328,9 +334,9 @@ Nothing below changes the product decision register. Every item marked
 | O-004 → D-024/D-025 | **Approved:** eight Blackwood slots, duplicate names allowed with disambiguation, shared reusable eight-character invitation code/link while lobby open, host regeneration; cryptographic generation and abuse mitigation required. | M1.4 invitation creation and M1.5 joining |
 | O-005 → D-025 | **Approved:** pre-start removal/replacement/reassignment with confirmation; no new participants or ordinary reassignment after start; existing guest reconnect/recovery allowed. | M1.5 joining; M1.6 assignment; later game-state implementation |
 | O-006 → D-023 | **Approved:** public role at assignment, own starting private dossier before game starts; future-act content phase-gated. | M1.6 assignment/private content and M1.7 reconnect/realtime content |
-| O-025 | **Partially implemented:** M1.3/M1.4 migrations are owner-reported as deployed and local/CI DB isolation is in place; M1.5/M1.6 rollout status is unverified. Backup/restore, retention, preview isolation and future deployment approval remain open. | Production operations and future migrations |
-| O-026 | **Awaiting owner approval:** server-only mystery storage, publication/versioning and authoring access. | M1.6/M1.7 private-content delivery or a dedicated content issue |
-| O-027 | **Awaiting owner approval:** public repository and story/IP/spoiler boundary. | Any public story/content release, deployment or portfolio disclosure |
+| O-025 | **Partially implemented:** local/CI database isolation is in place and production migration status is tracked in production operations. Backup/restore, retention, preview isolation and future deployment approval remain open. | Production operations and future migrations |
+| O-026 | **Resolved by D-026:** private immutable Supabase Storage packages with a restricted Postgres registry. | See mystery content architecture |
+| O-027 | **Future-source policy resolved by D-026;** existing public spoiler history is open as O-033. | Separate owner-reviewed remediation |
 
 ### (b) Reversible engineering recommendations (not product policy)
 
@@ -369,9 +375,10 @@ changing product policy, but their security invariants require tests.
 - [Mystery content model](../product/mystery-content-model.md) — §1
   projections and §7 conceptual persistence.
 - [Product vision](../product/product-vision.md) — MVP and environment status.
-- [M1.1 lobby foundation](lobby-foundation.md) and
-  [`src/lib/lobby/index.ts`](../../src/lib/lobby/index.ts) — domain contracts
-  and safe projections.
+- The M1.1 projection prototype (`src/lib/lobby/index.ts` and its
+  `lobby-foundation.md` note) was never used at runtime and was removed on
+  2026-11-23; the live projections are in
+  [`src/lib/lobby/service.ts`](../../src/lib/lobby/service.ts).
 - [Agent development lifecycle](../agent-development-lifecycle.md),
   [agent evaluation](../agent-evaluation.md), and
   [Copilot instructions](../../.github/copilot-instructions.md).

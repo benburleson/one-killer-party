@@ -1,33 +1,15 @@
 "use server";
 
 import { headers } from "next/headers";
-import { authClient, authConfig } from "@/lib/host/auth";
+import { authClient } from "@/lib/host/auth";
 import { validPartyId } from "@/lib/host/core";
-import { lobbyService, rateBucketHash, signedInUser } from "@/lib/lobby/service";
-import { normalizeDisplayName, normalizeInvitationCode } from "@/lib/lobby/core";
+import { forwardedClientAddress, normalizeDisplayName, validRecoveryToken } from "@/lib/lobby/core";
+import { normalizeInvitationCode } from "@/lib/lobby/invite-code";
+import { lobbyService, rateBucketHash, signedInUser, type GuestMembership } from "@/lib/lobby/service";
+import { sameOrigin } from "@/lib/request";
 import { captchaTokenFromForm } from "@/lib/turnstile-token";
 
-export type GuestFormState = {
-  message?: string;
-  membership?: {
-    partyId: string;
-    participantId: string;
-    displayName: string;
-    status: string;
-    participantCount: number;
-    assignedCharacterId: string | null;
-    assignedCharacter: {
-      id: string;
-      publicName: string;
-      archetype: string;
-      description: string;
-    } | null;
-  };
-};
-
-async function sameOrigin() {
-  return (await headers()).get("origin") === authConfig().origin;
-}
+export type GuestFormState = { message?: string; membership?: GuestMembership };
 
 type PrincipalResult =
   | { kind: "guest"; id: string }
@@ -55,12 +37,6 @@ async function guestPrincipal(captchaToken: string): Promise<PrincipalResult> {
   return { kind: "guest", id: data.user.id };
 }
 
-function requestRateBucket(scope: string, principal: string, requestHeaders: Headers) {
-  const forwardedFor = requestHeaders.get("x-vercel-forwarded-for") ??
-    requestHeaders.get("x-forwarded-for");
-  return rateBucketHash(scope, principal, forwardedFor);
-}
-
 export async function joinParty(_state: GuestFormState, form: FormData): Promise<GuestFormState> {
   try {
     if (!(await sameOrigin())) return { message: "Request unavailable. Please try again." };
@@ -83,7 +59,7 @@ export async function joinParty(_state: GuestFormState, form: FormData): Promise
       principal.id,
       code,
       displayName,
-      requestRateBucket("join", principal.id, await headers()),
+      rateBucketHash("join", principal.id, forwardedClientAddress(await headers())),
     );
     if (membership && "partyId" in membership) return { membership };
     if (membership?.outcome === "full") {
@@ -99,7 +75,7 @@ export async function redeemRecovery(_state: GuestFormState, form: FormData): Pr
   try {
     if (!(await sameOrigin())) return { message: "Recovery could not be completed. Ask the host for help." };
     const rawToken = form.get("recoveryToken");
-    if (typeof rawToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(rawToken)) {
+    if (!validRecoveryToken(rawToken)) {
       return { message: "Recovery could not be completed. Ask the host for help." };
     }
     const captchaToken = captchaTokenFromForm(form);
@@ -114,7 +90,7 @@ export async function redeemRecovery(_state: GuestFormState, form: FormData): Pr
     const membership = await lobbyService().redeemRecovery(
       principal.id,
       rawToken,
-      requestRateBucket("recovery", principal.id, await headers()),
+      rateBucketHash("recovery", principal.id, forwardedClientAddress(await headers())),
     );
     if (membership) return { membership };
   } catch {

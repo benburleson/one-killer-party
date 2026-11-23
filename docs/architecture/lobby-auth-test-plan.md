@@ -1,38 +1,29 @@
 # Lobby authentication and persistence test plan
 
-**Status: M1.3 schema/RLS and M1.4 host authentication/party creation coverage implemented; M1.5–M1.7 guest, assignment, and realtime coverage remains future work.**
+**Status: lobby coverage implemented; this matrix is the reference for what each test must prove.**
 
-Use synthetic accounts, parties and mystery fixtures only. The M1.3 pgTAP
-subset runs against local Supabase migrations and real database roles; it
-establishes schema constraints, grants, RLS status, and denial of direct
-browser table access, not future server-command behavior. Each later API test
-must exercise the same authorization and database/RLS paths used by the app;
-mock-only tests cannot establish that boundary. Do not use production
-credentials or data. See [the M1.3 persistence guide](lobby-persistence.md)
-and the [ADR](adr-0001-lobby-auth-and-persistence.md) for the current model
-and unresolved operational/content decisions.
+Use synthetic accounts, parties and mystery fixtures only. Tests must exercise
+the same authorization and database paths the app uses; mock-only tests cannot
+establish that boundary. Do not use production credentials or data.
 
-The M1.3 database test covers the schema-level portions of T-06, T-07, T-08,
-T-09, T-10, T-12, T-15, T-16, T-22, and T-23. Because direct browser access
-is denied entirely, host and participant requests are currently expected to
-fail at the database privilege boundary; M1.4 implements limited, authorized host commands; guest participant projections and additional commands are follow-on work. Uniqueness constraints
-are tested with competing inserts; two-session race behavior and optimistic
-command-version conflicts remain deferred to M1.6.
+Where the coverage lives:
 
-### Follow-on slices
+- **pgTAP (`supabase/tests/`):** schema constraints, RLS, grants, every
+  service-role RPC, cross-host and cross-party denial, and the schema-wide
+  deny-by-default guard in `security_invariants.test.sql`.
+- **Unit (`tests/unit/`):** validation, host command mapping, the public
+  catalog, server/client import boundaries and CI workflow safety.
+- **Playwright (`tests/e2e/host.integration.spec.ts`):** host sign-in, party
+  creation, guest join, assignment with stale-version conflict, recovery,
+  removal, last-slot race and isolation, on desktop and mobile against
+  disposable Supabase.
 
-Milestone sequence:
-
-- **M1.3:** persistence migrations and RLS
-- **M1.4:** host authentication and party creation
-- **M1.5:** guest identity, invitation validation and joining
-- **M1.6:** host assignment and participant/character uniqueness
-- **M1.7:** realtime notifications, authoritative refetch and reconnect
-
-These labels map the test targets to expected work; they do not create or
-authorize the follow-on issues. UI-level coverage should use Playwright only
-when the corresponding flow exists. DB integration checks require the
-separately approved disposable database described in the ADR.
+Not applicable or not yet built: the lobby synchronizes by authenticated
+polling, so the Realtime rows (T-20, T-21) have no subject; dossier, clue and
+solution cases (parts of T-08, T-10–T-12, T-24) wait for private content. The
+"Target follow-on" column keeps the original milestone labels (M1.3 schema,
+M1.4 host, M1.5 guest, M1.6 assignment, M1.7 synchronization) for
+traceability only.
 
 ## Test matrix
 
@@ -65,9 +56,8 @@ separately approved disposable database described in the ADR.
 
 ## Execution and evidence requirements
 
-- Implement only after the relevant decision approvals and isolated database
-  setup are recorded. No DB test in this plan should point to production or an
-  unverified shared development project.
+- No DB test should point to production or an unverified shared development
+  project.
 - Prefer stable synthetic IDs and secret-marker strings in test fixtures so
   accidental disclosure can be detected without real mystery or participant
   data. Never print secrets to explain a failure.
@@ -76,10 +66,10 @@ separately approved disposable database described in the ADR.
 - DB integration tests assert the database role, authenticated principal,
   RLS behavior, uniqueness and transaction outcomes using isolated test
   resources. Include both allowed and denied cases.
-- The M1.3 suite intentionally has no browser-role allowed table reads: all
-  `anon`/`authenticated` table privileges are revoked until a trusted
-  allowlisted server boundary exists. Tests assert RLS remains enabled so
-  removing RLS cannot silently pass merely because grants are also absent.
+- There are intentionally no browser-role allowed table reads: all
+  `anon`/`authenticated` privileges are revoked and access goes through
+  service-role RPCs. Tests assert RLS remains enabled so removing RLS cannot
+  silently pass merely because grants are also absent.
 - Playwright tests should use separate browser contexts for host, guest A,
   guest B, visitor and (where needed) a second party. Assert denial through
   direct routes/requests as well as visible controls. Use only synthetic
@@ -88,6 +78,3 @@ separately approved disposable database described in the ADR.
   availability, manual browser steps, interventions/retries, and remaining
   failures in the relevant PR. A passing landing-page screenshot is regression
   evidence only; it is not proof of lobby behavior.
-- M1.3 local commands and CI evidence belong in the PR and
-  [persistence guide](lobby-persistence.md); do not treat this broader matrix
-  as proof that deferred API/UI flows have shipped.

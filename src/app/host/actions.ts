@@ -4,16 +4,12 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { authClient, authConfig, currentUserId, hasAuthenticatedSession } from "@/lib/host/auth";
-import { originMismatchDetails, safeAuthErrorDetails, validEmail, type IssueResult } from "@/lib/host/core";
+import { originMismatchDetails, parsePartyVersion, safeAuthErrorDetails, validEmail, type IssueResult } from "@/lib/host/core";
 import { service } from "@/lib/host/service";
-import { lobbyService } from "@/lib/lobby/service";
-import { rateBucketHash } from "@/lib/lobby/service";
+import { forwardedClientAddress } from "@/lib/lobby/core";
+import { lobbyService, rateBucketHash } from "@/lib/lobby/service";
+import { sameOrigin } from "@/lib/request";
 import { captchaTokenFromForm } from "@/lib/turnstile-token";
-
-async function sameOrigin() {
-  const origin = (await headers()).get("origin");
-  return origin !== null && origin === authConfig().origin;
-}
 
 export type FormState = { message?: string; result?: IssueResult; link?: string; issuedVersion?: number };
 export type LobbyActionState = { message?: string; token?: string; updated?: boolean; conflict?: boolean };
@@ -91,11 +87,9 @@ export async function rotateInvite(_state: FormState, form: FormData): Promise<F
     if (!(await sameOrigin()) || form.get("confirm") !== "yes") {
       return { message: "Confirm that the previous code will stop working." };
     }
-    const rawVersion = form.get("version");
-    const version = typeof rawVersion === "string" && /^(0|[1-9]\d*)$/.test(rawVersion)
-      ? Number(rawVersion) : NaN;
+    const version = parsePartyVersion(form.get("version"));
     const result = await service().rotate(form.get("partyId"), version);
-    if (result.kind === "issued") {
+    if (result.kind === "issued" && version !== null) {
       return { result, link: `${authConfig().origin}/join#code=${result.code}`, issuedVersion: version + 1 };
     }
   } catch {
@@ -146,12 +140,10 @@ export async function assignCharacter(_state: LobbyActionState, form: FormData):
     const partyId = form.get("partyId");
     const participantId = form.get("participantId");
     const characterValue = form.get("characterId");
-    const rawVersion = form.get("version");
-    const version = typeof rawVersion === "string" && /^(0|[1-9]\d*)$/.test(rawVersion)
-      ? Number(rawVersion) : NaN;
+    const version = parsePartyVersion(form.get("version"));
     const host = await currentUserId();
     if (!host || typeof partyId !== "string" || typeof participantId !== "string" ||
-        typeof characterValue !== "string" || !Number.isSafeInteger(version)) {
+        typeof characterValue !== "string" || version === null) {
       return { message: "Could not update this assignment. Refresh the party and try again." };
     }
     const outcome = await lobbyService().assignCharacter(
@@ -194,14 +186,11 @@ export async function initiateRecovery(_state: LobbyActionState, form: FormData)
     if (!host || typeof partyId !== "string" || typeof participantId !== "string") {
       return { message: "Could not start recovery." };
     }
-    const requestHeaders = await headers();
-    const forwardedFor = requestHeaders.get("x-vercel-forwarded-for") ??
-      requestHeaders.get("x-forwarded-for");
     const token = await lobbyService().initiateRecovery(
       host,
       partyId,
       participantId,
-      rateBucketHash("recovery-issue", host, forwardedFor),
+      rateBucketHash("recovery-issue", host, forwardedClientAddress(await headers())),
     );
     if (!token) return { message: "Could not start recovery. The party may have changed." };
     return { token };

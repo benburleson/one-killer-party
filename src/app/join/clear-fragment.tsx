@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { invitationCodeFromFragment } from "@/lib/lobby/core";
+import { invitationCodeFromFragment } from "@/lib/lobby/invite-code";
 
 export function ClearFragment({ onCode }: { onCode: (code: string) => void }) {
   useEffect(() => {

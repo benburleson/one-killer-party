@@ -2,7 +2,6 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
-import { service } from "@/lib/host/service";
 import { currentUserId } from "@/lib/host/auth";
 import { lobbyService } from "@/lib/lobby/service";
 import { BLACKWOOD_PUBLIC_CHARACTERS } from "@/lib/lobby/public-characters";
@@ -13,17 +12,22 @@ import { HostLobbySync } from "../../lobby-sync";
 async function Party({ params }: { params: Promise<{ partyId: string }> }) {
   await connection();
   const { partyId } = await params;
-  let party;
-  try { party = await service().get(partyId); } catch { redirect("/host"); }
-  if (!party) redirect("/host");
+  // hostRoster re-verifies the host and reads the party once; a missing,
+  // foreign or malformed party is indistinguishable and returns to the list.
   let roster;
   try {
     const host = await currentUserId();
     if (!host) redirect("/host");
-    roster = await lobbyService().hostRoster(host, party.partyId);
+    roster = await lobbyService().hostRoster(host, partyId);
   } catch { redirect("/host"); }
+  const party = roster;
   const participants = roster.participants;
   const hostIsPlaying = participants.some((participant) => participant.isHost);
+  // Client components receive explicit allowlisted props, never whole server records.
+  const assignmentRoster = participants.map(({ participantId, displayName, assignedCharacterId }) =>
+    ({ participantId, displayName, assignedCharacterId }));
+  const characterOptions = BLACKWOOD_PUBLIC_CHARACTERS.map(({ id, publicName, archetype }) =>
+    ({ id, publicName, archetype }));
   const capacity = party.mysteryId === "blackwood-affair" ? 8 : null;
   return <>
     <div className="flex justify-between gap-4">
@@ -63,9 +67,12 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
               key={participant.participantId}
               partyId={party.partyId}
               version={roster.version}
-              participant={participant}
-              participants={participants}
-              characters={BLACKWOOD_PUBLIC_CHARACTERS}
+              participant={{
+                participantId: participant.participantId,
+                assignedCharacterId: participant.assignedCharacterId,
+              }}
+              participants={assignmentRoster}
+              characters={characterOptions}
             />
             {!participant.isHost && <>
               <RemoveParticipantForm partyId={party.partyId} participantId={participant.participantId} />

@@ -17,7 +17,7 @@ Closes #
 Provide actual results, not assumptions.
 
 ## Screenshots and browser evidence
-For UI changes, attach real screenshots or credential-safe GitHub Actions evidence. For docs-only changes, state “not applicable” for changed-UI screenshots; link actual CI evidence where available. Never invent screenshots or upload arbitrary DOM, traces, or logs. Draft promotion still requires a successful current-SHA CI run with a nonempty `playwright-evidence` artifact.
+For UI changes, attach real screenshots or credential-safe GitHub Actions evidence. For docs-only changes, state “not applicable” for changed-UI screenshots; link actual CI evidence where available. Never invent screenshots or upload arbitrary DOM, traces, or logs. Drafts are marked ready by a human after a successful CI run on the current head SHA.
 
 ## Preview deployment
 Verified Vercel preview URL (or explain why unavailable). A preview is not a production deployment:

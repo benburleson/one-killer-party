@@ -51,12 +51,11 @@ The repository's current application code supports host magic-link sign-in, Blac
 - **Application:** https://app.onekillerparty.com (host page at `/host`)
 - **Marketing domain:** https://onekillerparty.com (also `www.onekillerparty.com`)
 - **Stack:** Vercel, Supabase Auth/Postgres, and custom SMTP (owner-reported configuration); see [production operations](docs/production-operations.md)
-- **Merged implementation:** M1.5–M1.7 guest/lobby features are in the repository; M1.7 merged in [PR #36](https://github.com/benburleson/one-killer-party/pull/36).
-- **Production rollout:** M1.5/M1.6 remote migration state, production deployment of M1.5–M1.7, and post-M1.7 production smoke test are **not verified here**. M1.7 does not require a database migration. A merged PR or Vercel PR check is not production evidence; see the dated status table in [production operations](docs/production-operations.md).
+- **Production status:** the owner attests that the lobby migrations through `20261122010000_public_character_assignment.sql` are applied and that guest join/recovery, role assignment and lobby synchronization were smoke-tested in production. This is owner attestation, not independently verified evidence; `20261123000000_browser_role_lockdown_and_join_pin.sql` is not applied. See [production operations](docs/production-operations.md).
 - **Local/CI integration:** disposable Supabase Docker stack; migration/RLS tests and local host-flow browser tests
 - **Delivery:** Copilot issue-to-PR development with CI and human-reviewed merge
 
-For durable setup and security instructions, see [development environments](docs/development-environments.md), [lobby persistence](docs/architecture/lobby-persistence.md), [production operations](docs/production-operations.md), and [agent evaluation](docs/agent-evaluation.md). Past trials and incident diagnostics belong in GitHub PRs, CI runs and the evaluation log, not in this README.
+For setup and security instructions, see [development environments](docs/development-environments.md), [lobby persistence](docs/architecture/lobby-persistence.md), [mystery content architecture](docs/architecture/mystery-content-architecture.md) and [production operations](docs/production-operations.md). Dated trials and incidents live only in the [agent evaluation](docs/agent-evaluation.md) archive.
 
 ## Development environment — dev container first
 
@@ -76,6 +75,7 @@ Open forwarded port **3000**. Start the disposable local Supabase stack with `np
 ### Verify locally
 
 ```bash
+npm run test:unit
 npm run lint
 npx tsc --noEmit
 npm run build
@@ -94,7 +94,7 @@ For setup details and known limitations, see [development environments](docs/dev
 
 ## How to explore the showcase
 
-Start with [the lifecycle](docs/agent-development-lifecycle.md) and [environment setup](docs/workflow-setup.md); inspect public [issues](https://github.com/benburleson/one-killer-party/issues), [pull requests](https://github.com/benburleson/one-killer-party/pulls), and [Actions runs](https://github.com/benburleson/one-killer-party/actions). See the [evaluation rubric](docs/agent-evaluation.md) for measured autonomy and the [draft promotion policy](docs/pr-auto-promotion.md).
+Start with [the lifecycle](docs/agent-development-lifecycle.md) and [environment setup](docs/workflow-setup.md); inspect public [issues](https://github.com/benburleson/one-killer-party/issues), [pull requests](https://github.com/benburleson/one-killer-party/pulls), and [Actions runs](https://github.com/benburleson/one-killer-party/actions). See the [evaluation rubric](docs/agent-evaluation.md) for measured autonomy. Draft PRs are marked ready and merged by a human; automatic draft promotion was retired.
 
 ## Stack and safety
 

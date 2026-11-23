@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  forwardedClientAddress,
   generateRecoveryToken,
-  invitationCodeFromFragment,
   normalizeDisplayName,
-  normalizeInvitationCode,
   recoveryTokenVerifier,
+  validRecoveryToken,
 } from "../../src/lib/lobby/core.ts";
+import {
+  invitationCodeFromFragment,
+  normalizeInvitationCode,
+} from "../../src/lib/lobby/invite-code.ts";
 
 test("invite fragments accept only the code and are safe to discard before submission", () => {
   assert.equal(invitationCodeFromFragment("#code=ABCD2345"), "ABCD2345");
@@ -40,4 +44,21 @@ test("recovery credentials have 256 bits of randomness and store only a SHA-256 
   const verifier = recoveryTokenVerifier(first);
   assert.match(verifier, /^\\x[0-9a-f]{64}$/);
   assert.notEqual(verifier, first);
+});
+
+test("recovery credential shape accepts only generated 43-character base64url strings", () => {
+  assert.equal(validRecoveryToken(generateRecoveryToken()), true);
+  for (const value of [null, undefined, 43, "", "a".repeat(42), "a".repeat(44), "a".repeat(42) + "=", "a".repeat(42) + "/"]) {
+    assert.equal(validRecoveryToken(value), false);
+  }
+});
+
+test("rate-limit source prefers the platform-overwritten forwarded header", () => {
+  const headers = (values) => new Headers(values);
+  assert.equal(forwardedClientAddress(headers({
+    "x-vercel-forwarded-for": "203.0.113.7",
+    "x-forwarded-for": "198.51.100.9",
+  })), "203.0.113.7");
+  assert.equal(forwardedClientAddress(headers({ "x-forwarded-for": "198.51.100.9" })), "198.51.100.9");
+  assert.equal(forwardedClientAddress(headers({ forwarded: "for=198.51.100.9" })), null);
 });

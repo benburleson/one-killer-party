@@ -1,6 +1,6 @@
 # Workflow setup and operations runbook
 
-This document is a reproducible runbook, **not a statement that all account-level settings have been completed**. Dates and screenshots of successful runs should be added as each milestone is verified.
+This is the runbook for repository, agent and CI setup. Account-level settings (rulesets, Copilot access, Vercel) are owner-managed and cannot be verified from the repository. Dated trial records live in [agent evaluation](agent-evaluation.md).
 
 ## Phase 0: security and source control
 
@@ -15,7 +15,7 @@ This document is a reproducible runbook, **not a statement that all account-leve
 1. Verify GitHub Copilot plan eligibility and coding-agent availability in GitHub settings.
 2. Confirm the repository permits agent sessions. See [GitHub's current agent guide](https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/overview).
 3. Keep `.github/copilot-instructions.md` updated with conventions, checks, and security limits.
-4. Optional: add a dedicated `.github/workflows/copilot-setup-steps.yml` to preinstall dependencies in the managed agent environment. A dev container by itself does not configure that environment.
+4. `.github/workflows/copilot-setup-steps.yml` preinstalls dependencies in the managed agent environment. A dev container by itself does not configure that environment.
 5. Create a small, well-specified issue with the Agent task template. Assign the issue to Copilot from the GitHub issue UI.
 6. Observe the agent session and draft PR. Document session duration, intervention, CI results, changed files, and evidence. Do not hand-fix an agent PR without recording it.
 7. Ask the agent to address failing CI through PR comments or agent handoff instead of manually committing a fix, except when diagnosing the workflow itself.
@@ -57,22 +57,9 @@ Use a stable incident key (source, service, error signature, environment), bound
 - GitHub Copilot's standard hosted coding agent uses a managed GitHub Actions runtime; configure it separately as needed.
 - CI uses Node 22 and `npm ci`. Try to keep all three environments aligned, without assuming they are the same container.
 
-## Verification record
+## Running CI without intermediate human approval
 
-Add dated links to real CI runs, PRs, screenshots and alert-created issues as they occur. Until an item has such evidence, treat it as planned or configured, not proven.
-
-## Verified baseline and approval policy (2026-11-20)
-
-- GitHub Copilot was assigned [Issue #2](https://github.com/benburleson/one-killer-party/issues/2), created [PR #3](https://github.com/benburleson/one-killer-party/pull/3) on its own branch, and the PR was merged by a human.
-- [CI run #6](https://github.com/benburleson/one-killer-party/actions/runs/44832837014) passed both **Lint, TypeScript, build** and **Playwright landing-page smoke test**; a `playwright-evidence` artifact was published.
-- Vercel preview deployment succeeded and its URL was opened by the human.
-- The repository owner reports that the `main` ruleset is configured.
-- During trial 1, GitHub asked the owner to approve an agent-originated workflow run. The owner subsequently disabled Copilot **Require approval for workflow runs** in repository settings.
-- Later Copilot PRs and CI runs provide current evidence; see [agent evaluation](agent-evaluation.md) and the live [GitHub Actions](https://github.com/benburleson/one-killer-party/actions).
-
-### Running CI without intermediate human approval
-
-The intended policy is **unattended CI but attended merge**. Disabling Copilot workflow-run approval permits agent-authored workflow steps to execute; it does *not* mean PR content is trusted. Review the threat model and keep:
+The policy is **unattended CI but attended merge**. The owner reports that Copilot's **Require approval for workflow runs** setting is disabled. That permits agent-authored workflow steps to execute; it does *not* mean PR content is trusted. Review the threat model and keep:
 
 1. PR workflow token permissions at `contents: read` unless an exception is explicitly reviewed.
 2. Production secrets and deployment credentials unavailable to untrusted PR jobs.
@@ -80,38 +67,36 @@ The intended policy is **unattended CI but attended merge**. Disabling Copilot w
 4. Protected `main`, human merge decision, and no agent auto-merge authority.
 5. Future security or permissions modifications subject to separate human approval before merge.
 
-If a later trial reveals another approval gate, record which GitHub setting or workflow triggered it before changing security policy.
+If another approval gate appears, record which GitHub setting or workflow triggered it before changing security policy.
 
-## Current workflow map and review (2026-11-23)
+## Workflow map
 
-| Workflow | Triggers and jobs | Permissions / boundary | Review outcome |
-| --- | --- | --- | --- |
-| [`ci.yml`](../.github/workflows/ci.yml) | `pull_request` to `main`, `push` to `main`, `workflow_dispatch`; independent local DB/RLS, lint-unit-type-build, CodeQL, browser smoke, and local-Supabase integration jobs | Default `contents: read`; only CodeQL adds `security-events: write` and `actions: read`. Supabase is disposable/local. No production credentials. | Preserved job and trigger boundaries. Startup failures now report only exit/Docker/container-state categories; allowlisted integration evidence warns if absent instead of adding a second failure. |
-| [`copilot-setup-steps.yml`](../.github/workflows/copilot-setup-steps.yml) | Manual dispatch, or push/PR touching only this workflow; installs Node 22, npm dependencies, Chromium | `contents: read`; no production credentials | No change; setup remains separate from CI and Codespaces. |
-| [`promote-agent-pr.yml`](../.github/workflows/promote-agent-pr.yml) | `workflow_run` after CI completion and `pull_request_target` for edits to a draft | `actions: read`, `contents: read`, `pull-requests: write`; trusted workflow does not checkout or execute PR code | No eligibility, permission, artifact-trust, or trigger change. See [promotion policy](pr-auto-promotion.md) for the observed evidence mismatch and mutation failure. |
+| Workflow | Triggers and jobs | Permissions / boundary |
+| --- | --- | --- |
+| [`ci.yml`](../.github/workflows/ci.yml) | `pull_request` to `main`, `push` to `main`, `workflow_dispatch`. Jobs: local DB/RLS tests; unit, lint, type-check and build; and on PRs or manual dispatch only, CodeQL, browser smoke and local-Supabase integration | Default `contents: read`; only CodeQL adds `security-events: write` and `actions: read`. Supabase is disposable and local. No production credentials |
+| [`copilot-setup-steps.yml`](../.github/workflows/copilot-setup-steps.yml) | Manual dispatch, or push/PR touching this workflow; installs Node 22, npm dependencies, Chromium | `contents: read`; no production credentials |
 
-CI's check/job names are visible in Actions, but this repository review could
-not inspect GitHub branch-protection/ruleset settings. The owner must verify
-which checks are required in Settings; do not infer them from workflow YAML.
-No path filters, automatic merge, permission expansion, or production access
-was added. Concurrency and event triggers are unchanged.
+The two jobs that need Supabase share
+[`start-local-supabase`](../.github/actions/start-local-supabase/action.yml),
+a local composite action with no inputs, secrets or expressions. It suppresses
+raw CLI output, which prints local keys, and on failure reports only the exit
+code, Docker reachability and container status. Evidence uploads are
+allowlisted screenshots with 14-day retention and warn, rather than fail, when
+an earlier failure produced none. `tests/unit/workflow-safety.test.mjs` guards
+both rules.
 
-**Before/after:** the two local Supabase startup steps previously discarded
-all output, including the distinction between an unavailable Docker daemon and
-a CLI/container startup failure. They still suppress raw output and now emit
-only categorical diagnostics on failure. Integration screenshot upload
-previously used `if-no-files-found: error`; it now warns if an earlier failure
-prevented evidence creation. The promotion eligibility rule remains unchanged:
-the `playwright-evidence` name and nonempty requirement are preserved, while
-its payload is narrowed to the landing-page screenshot rather than all test
-results and HTML reports. Human review should confirm this allowlist remains
-credential-free. No promotion permission, trigger, or readiness-rule change
-is proposed.
+Which checks are required for merge is a GitHub ruleset setting the owner
+manages; do not infer it from workflow YAML. Changing workflow permissions,
+triggers or the evidence allowlist needs explicit human review.
 
-The PR template's headings match the promotion parser: `Validation`,
-`Screenshots and browser evidence`, and `Human verification steps`. For a
-docs-only PR, state that changed-UI screenshots are not applicable; do not
-fabricate a screenshot. Promotion still requires a successful current-SHA CI
-run with a nonempty `playwright-evidence` artifact, which can be the real
-credential-free landing-page smoke evidence. It is not a screenshot of the
-documentation and does not replace human review.
+## Draft PRs are marked ready by a human
+
+There is no automatic draft promotion; the former workflow was retired on
+2026-11-23 (reasons and run history in [agent evaluation](agent-evaluation.md)).
+No workflow uses `pull_request_target` or holds `pull-requests: write`.
+
+An agent PR stays a draft until a human reviews the handoff, confirms a
+successful CI run on the current head SHA, and marks it ready. The PR
+template's `Validation`, `Screenshots and browser evidence` and
+`Human verification steps` sections are still required. For a docs-only PR,
+state that changed-UI screenshots are not applicable; do not fabricate one.

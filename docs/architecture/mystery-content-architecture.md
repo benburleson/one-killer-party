@@ -14,8 +14,8 @@ eight public identities, not private packages. Party creation pins
 `blackwood-affair` / `first-playtest-placeholder-v1`; assignment migrations
 register those public IDs. [Lobby persistence](lobby-persistence.md) describes
 service-role RPCs, authenticated polling, removal and recovery. No dossier,
-release engine or reveal exists today. Remote rollout status is not inferred
-from merged code; see [production operations](../production-operations.md).
+release engine or reveal exists today. Production status is recorded in
+[production operations](../production-operations.md).
 
 **Public source is a separate boundary from runtime access.** The public
 repository's [Blackwood draft](../product/blackwood-affair.md) already contains
@@ -235,7 +235,7 @@ must fail. The client never receives the full package for filtering.
   source maps, downloadable files, test traces and CI artifacts must not expose
   private packages. Use synthetic sentinel fixtures for scans; do not publish
   actual private payloads or arbitrary DOM/screenshots.
-* **Invalidation:** Reuse M1.7 authenticated polling as a version/invalidation
+* **Invalidation:** Reuse the lobby's authenticated polling as a version/invalidation
   signal, not a content-bearing push event. On change, fetch a fresh authorized
   projection; do not send private content through notifications, Realtime or
   broadcast channels. Stop polling on denied access, and recheck on reconnect.

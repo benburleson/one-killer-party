@@ -1,10 +1,11 @@
 import "server-only";
 import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
-import { createClient, isAuthApiError, isAuthSessionMissingError } from "@supabase/supabase-js";
+import { isAuthApiError, isAuthSessionMissingError } from "@supabase/supabase-js";
 import { authClient, currentUserId } from "@/lib/host/auth";
 import { validPartyId, verifiedEmailHost, verifier } from "@/lib/host/core";
-import { generateRecoveryToken, recoveryTokenVerifier } from "./core";
+import { serviceRoleClient } from "@/lib/supabase/service-client";
+import { generateRecoveryToken, recoveryTokenVerifier, validRecoveryToken } from "./core";
 import {
   BLACKWOOD_PUBLIC_CHARACTERS,
   isBlackwoodPackage,
@@ -31,16 +32,6 @@ export type HostParticipant = {
   assignedCharacterId: PublicCharacterId | null;
   assignedCharacter: PublicCharacterCard | null;
 };
-
-function rpcClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Lobby service is not configured");
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }) },
-  });
-}
 
 function membership(row: unknown): GuestMembership | null {
   if (!row || typeof row !== "object") return null;
@@ -93,11 +84,18 @@ export function rateBucketHash(scope: string, principal: string, forwardedFor: s
 }
 
 export function lobbyService() {
-  const client = rpcClient();
+  const client = serviceRoleClient();
   async function call(name: string, args: Record<string, unknown>) {
     const { data, error } = await client.rpc(name, args);
     if (error) throw new Error("Lobby command unavailable");
     return data;
+  }
+  async function guestMemberships(principal: string): Promise<GuestMembership[]> {
+    const data = await call("get_guest_membership", { p_principal: principal });
+    if (!Array.isArray(data)) throw new Error("Lobby command unavailable");
+    const memberships = data.map(membership);
+    if (memberships.some((item) => item === null)) throw new Error("Lobby command unavailable");
+    return memberships as GuestMembership[];
   }
 
   return {
@@ -118,20 +116,23 @@ export function lobbyService() {
         status: row.status,
         participant_count: row.participant_count,
         assigned_character_id: null,
-        mystery_id: "blackwood-affair",
-        mystery_version: "first-playtest-placeholder-v1",
+        mystery_id: row.mystery_id,
+        mystery_version: row.mystery_version,
       }) : { outcome: row.outcome === "full" ? "full" : "unavailable" } as const;
     },
     async myMemberships(principal: string): Promise<GuestMembership[]> {
       if ((await signedInUser())?.id !== principal) throw new Error("Lobby command unavailable");
-      const data = await call("get_guest_membership", { p_principal: principal });
-      if (!Array.isArray(data)) throw new Error("Lobby command unavailable");
-      const memberships = data.map(membership);
-      if (memberships.some((item) => item === null)) throw new Error("Lobby command unavailable");
-      return memberships as GuestMembership[];
+      return guestMemberships(principal);
     },
-    async hostRoster(host: string, partyId: string): Promise<{ participants: HostParticipant[]; version: number }> {
-      if (await currentUserId() !== host) throw new Error("Lobby command unavailable");
+    /** One authorized read of the party and its roster for the verified host. */
+    async hostRoster(host: string, partyId: string): Promise<{
+      partyId: string;
+      status: "LOBBY";
+      mysteryId: string;
+      participants: HostParticipant[];
+      version: number;
+    }> {
+      if (!validPartyId(partyId) || await currentUserId() !== host) throw new Error("Lobby command unavailable");
       const partyData = await call("get_host_party", { p_host: host, p_party_id: partyId });
       if (!Array.isArray(partyData) || partyData.length !== 1) throw new Error("Lobby command unavailable");
       const party = partyData[0] as Row;
@@ -162,7 +163,13 @@ export function lobbyService() {
           assignedCharacter,
         };
       });
-      return { participants, version: rosterVersion };
+      return {
+        partyId,
+        status: "LOBBY",
+        mysteryId: party.mystery_id as string,
+        participants,
+        version: rosterVersion,
+      };
     },
     async assignCharacter(
       host: string,
@@ -223,7 +230,7 @@ export function lobbyService() {
     },
     async redeemRecovery(principal: string, token: string, bucketHash: string) {
       if ((await signedInUser())?.id !== principal) return null;
-      if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+      if (!validRecoveryToken(token)) return null;
       const data = await call("redeem_participant_recovery", {
         p_new_principal: principal,
         p_verifier_hash: recoveryTokenVerifier(token),
@@ -233,11 +240,7 @@ export function lobbyService() {
       const row = data[0] as Row;
       if (row.outcome !== "recovered" || !validPartyId(row.party_id) ||
           !validPartyId(row.participant_id)) return null;
-      const refreshed = await call("get_guest_membership", { p_principal: principal });
-      if (!Array.isArray(refreshed)) throw new Error("Lobby command unavailable");
-      const memberships = refreshed.map(membership);
-      if (memberships.some((item) => item === null)) throw new Error("Lobby command unavailable");
-      return (memberships as GuestMembership[]).find((item) =>
+      return (await guestMemberships(principal)).find((item) =>
         item.partyId === row.party_id && item.participantId === row.participant_id) ?? null;
     },
   };
