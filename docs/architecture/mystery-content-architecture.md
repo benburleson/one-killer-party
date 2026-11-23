@@ -1,9 +1,6 @@
 # Versioned mystery content and spoiler-safe projections
 
-**Status: Proposed — owner review required.** This is an implementation
-contract, not permission to publish content, implement gameplay, migrate a
-database, or deploy. [O-026 and O-027](../product/decisions-and-open-questions.md)
-remain open. Confirmed product decisions and the
+**Status: Accepted design direction — owner decisions 2026-11-22 (D-026–D-028).** This is an implementation contract, NOT authorization to provision storage, publish private content, migrate a database, implement gameplay, or deploy. Confirmed product decisions and the
 [content model](../product/mystery-content-model.md) take precedence over this
 proposal; the [gameplay specification](../product/gameplay-specification.md)
 and [flows](../product/host-and-player-flows.md) describe intended behavior,
@@ -43,37 +40,29 @@ access to private content. Editors and deployment operators who can read the
 package are trusted with spoilers; operational host privileges are not editorial
 privileges.
 
-## Storage and source options (O-026 / O-027)
+## Architecture decision: private immutable packages, Postgres runtime state
 
-| Dimension | Server-only immutable versioned JSON/data module | Private normalized Postgres tables | Hybrid: server-only package + Postgres party/release state |
-| --- | --- | --- | --- |
-| Spoiler isolation | Server-only import and explicit projections required; full package in server deployment | Private tables, restrictive grants/RLS and narrow trusted RPCs; privileged DB access sees all | Package stays server-only; DB stores no dossier or solution. Both boundaries must be secured |
-| Public source / IP | Public repo exposes any committed content; server-only does not change that | Can keep data outside public Git, but SQL seeds/migrations or backups may expose it | Same public-source risk as module unless package is supplied from controlled source |
-| Immutable pinning | Version and digest indexed in package registry; retain old artifacts | Versioned rows plus constraints and publication immutability | Registry and DB pin version **and** digest; fail closed on mismatch |
-| Atomic releases | DB transition controls release; application must check state before projection | State and content can be read/updated in one transaction | DB atomically changes phase/releases; immutable package mapped only after authorized snapshot |
-| Migrations | No content-table migration; state/pin changes still need migrations | Content schema, grants, publication and data migrations per evolution | State/pin/release schema migrations; package schema evolves separately |
-| Editing / review | Simple diffs and validation, but spoilers visible to repo readers | Editors/import tooling and DB diffs add complexity | Simple package review plus explicit state schema; two deployment artifacts |
-| Backup / rollback | Retain and restore exact versioned deployment artifacts; app rollback must retain all active versions | DB backups and tested restore; rollback must not mutate published rows | Back up DB state and retain matching packages/digests; rollback both compatibly |
-| Testing / Vercel | Easy fixture tests; server bundle grows and all active versions must ship with each compatible deployment | Real DB integration/permission tests; Vercel depends on DB availability | Fixture and local DB tests; Vercel must include or securely retrieve every active package |
+**Selected: private-object-store + Postgres hybrid**, not Copilot's initial server-bundled hybrid. Use an access-controlled **private Supabase Storage bucket** for versioned, immutable JSON mystery packages; a **restricted Postgres registry** stores only package identifiers, schema versions, SHA-256 digests, private object locators, publication provenance and approval metadata. Parties, assignments, identities, phases, releases and accusations remain authoritative in Postgres. The Next.js server alone accesses package bytes and constructs allowlisted public/host/participant projections after fresh database authorization.
 
-**Recommendation for the first prototype:** hybrid with an immutable,
-server-only versioned data package and Postgres as authority for parties,
-membership, phase and releases. Keep package contents out of browser-facing
-queries and store only identifiers/digests in state. This avoids an authoring
-database and makes content review and validation straightforward, at the cost
-of coordinating two artifacts and retaining old versions in every compatible
-deployment. A `server-only` marker is a guardrail, not an authorization system.
-Do not treat this recommendation as an accepted decision.
+| Alternative | Strength | Reason not selected for the first prototype |
+| --- | --- | --- |
+| Complete private package in server-only source files in the existing public repo | Simple TypeScript authoring/build validation | Public repository and Git history expose spoilers; server deployments must carry old packages |
+| Private authoring repo injected into Vercel build + Postgres state | Private edits and deterministic deployment | Requires coordinating packages with each build and retaining old versions across deployment rollbacks |
+| Fully normalized private Postgres content tables | SQL constraints, one persistence system | More tables, RLS/RPC authoring surface and migration coupling than needed for one mystery |
+| **Private Supabase Storage immutable object + Postgres state (selected)** | Story is outside public Git, unchanged across app deploys, package publication separated from gameplay transactions | Requires trusted publication tool, object/DB backup compatibility and server-only access |
+| New third-party private CMS/object store | Useful for a future authoring platform | Additional vendor/operational overhead and security boundary |
 
-The owner may deliberately leave the prototype draft openly documented and
-accept that participants can find spoilers. For future copyrighted or
-confidential assets, alternatives include a separately access-controlled
-private source or controlled storage loaded only by trusted deployments.
-Either requires approved access, licensing, provenance, review, version
-retention, backup/restore and deployment/rotation procedures; private hosting
-does not undo public history. Record source, author/rights approval, reviewer,
-publication time and digest without publishing private text. No private source,
-asset transfer or access policy is authorized here.
+**Private-source policy (D-026):** Do not commit new private dossiers, murderer revelations, solution text or future clues to this public repo, SQL migrations, test fixtures, issues or PR discussions. Author them in an access-controlled private editorial source, reviewed by an authorized editor. The exact private editor/repository is an operational choice, not a dependency on the runtime. This repo may retain **synthetic** test packages and spoiler-free public metadata.
+
+**Publication path:** A trusted, operator-invoked publishing tool validates schema, eight-role references, act/audience classifications and editorial approval; canonicalizes exact package bytes; computes digest; uploads to a **private, non-overwriting object key** (mystery/version/digest); independently reads back and verifies checksum; then registers/publishes the version in Postgres. Registration and party pins are database-transactional; object upload itself is not, so failed registration leaves a nonpublished orphan for privileged cleanup. Never serve unpublished versions. No public bucket, browser read grant, browser signed URL, client-visible object locator or publicly exposed publishing endpoint. Restrict publishing permissions separately from normal game reads, audit publications, and prevent editing/replacing a published key even by application service code. Supabase service credentials can bypass RLS and require tight server/operator protection.
+
+**Preserved versions (D-027):** Every party keeps its exact pinned **published version and digest for its lifetime**, unaffected by new packages or Vercel releases. Corrections become new versions; do not mutate or upgrade existing parties, and do not fall back to latest if pinned object is missing. New parties can pin a newly approved version at creation. Retain published objects while referenced, including across deploy rollback, with durable object + database backup and restore, hash verification and schema compatibility checks. A missing/mismatched object fails closed with a safe unavailable response. Cache verified immutable package bytes only inside a trusted server, keyed by immutable version+digest; never cache user-specific authorization results across callers. For old application deployments unable to interpret a newer schema, prevent creating new parties using that schema until deployed code supports it, while existing party versions remain retrievable.
+
+**Existing placeholder parties:** `blackwood-affair / first-playtest-placeholder-v1` is a **public roster placeholder**, not a published private mystery package. Keep such parties in their existing public lobby and deny private dossier/game-start reads. For a playable version create a **new party** pinned to an approved published package; do not silently repin existing parties or overwrite that identifier. Any exceptional upgrade/recreation policy would need a new owner-approved decision.
+
+**Public-repo history cannot be retroactively private:** `docs/product/blackwood-affair.md` already includes spoiler text in public Git and historical commits. The decision protects **future private content**; it does not make those existing spoilers secret. Any removal/redaction from the public repository, handling of clones/caches or transfer to private editorial source is a **separate explicitly reviewed task**. Do not delete or rewrite existing canonical story in this ADR.
+
+**Operator prerequisites, not yet authorized:** create and secure the private storage bucket; define editorial source and publisher permissions; protect credentials; establish private test/preview isolation; backup/restore, retention and audit requirements; verify package registry/blob availability before rollout. No automatic CI or Copilot production publishing.
 
 ## Proposed immutable package contract
 
@@ -87,13 +76,19 @@ type ReleasePhase = "ACT_1" | "ACT_2" | "ACT_3";
 type PartyPhase = "LOBBY" | ReleasePhase | "ACCUSATIONS" | "REVEAL" | "COMPLETE";
 type PublishedVersion = {
   mysteryId: Id; version: string; schemaVersion: number;
-  digest: string; publishedAt: string; provenanceRef: string;
+  digestSha256: string; publishedAt: string; provenanceRef: string;
 };
 type PublicCharacter = {
   id: Id; publicName: string; archetype: string; description: string;
 };
 type StartingDossier = {
   characterId: Id; biography: string; interpersonalPrompts: string[];
+  // Explicitly exclude guilt, crime method, cover story and future clues.
+};
+type MurdererBriefing = {
+  characterId: Id; releasePhase: "ACT_1";
+  guiltNotice: string; motive: string; method: string;
+  timeline: string; coverStory: string;
 };
 type Audience = { kind: "PUBLIC" } | { kind: "CHARACTER"; characterId: Id };
 type ReleasedItem = {
@@ -111,7 +106,8 @@ type Solution = {
 type MysteryDefinition = {
   publication: PublishedVersion; title: string; publicSynopsis: string;
   supportedPlayerCounts: number[]; characters: PublicCharacter[];
-  startingDossiers: StartingDossier[]; items: ReleasedItem[];
+  startingDossiers: StartingDossier[]; murdererBriefing: MurdererBriefing;
+  items: ReleasedItem[];
   publicEvents: PublicEvent[]; solution: Solution;
   motiveIds: Id[]; methodIds: Id[];
 };
@@ -123,10 +119,7 @@ need explicit audience and release rules, not a generic blob passed to clients.
 `StartingDossier` is deliberately separate from Act I items: under D-023 the
 assigned player's approved starting biography and optional interpersonal
 prompts are available in `LOBBY`. Only material editorially approved for
-pre-start belongs there. Killer knowledge must be in the assigned role's
-dossier **only if** its release point is owner-approved as pre-start;
-otherwise it is a character-only item at its approved phase. D-006 requires the
-murderer to know; it does not authorize inventing the timing or content.
+pre-start belongs there. **D-028 fixes the murderer reveal at ACT_1 start.** The murderer receives an ordinary nonspoiler starting dossier in LOBBY under D-023. Guilt, motive, method, chronology and cover story reside in a **separate ACT_1-only MurdererBriefing**, withheld even from that character until the host's authorized ACT_1 transition commits its release. Editorial review must remove indirect guilt and future-act leaks from all pre-start fields. No operating-host projection includes a murderer identifier.
 Future-act evidence and the solution never appear in the starting dossier.
 `EVIDENCE` means immutable official artifact/observation; personal knowledge
 and rumor are not official proof. Public events are distinct announcements.
@@ -153,19 +146,16 @@ A draft is mutable only before publication. Publication requires validation,
 editorial and owner approval, an immutable unique `(mysteryId, version)` and
 digest, and retained exact bytes. Never overwrite or reuse a published version,
 even for a correction: publish a new version. Party creation pins the exact
-published tuple and digest transactionally; a missing package or digest mismatch
-fails closed, never falls back to latest. Retain active versions across Vercel
-deployments and restore/rollback; prevent deletion while referenced. A future
+published registry version and digest transactionally; a missing private object or digest mismatch
+fails closed, never falls back to latest. Retain object versions independently of Vercel
+deployments, coordinate DB+object restore/rollback, and prevent deletion while any party references them. A future
 schema must enforce immutability and referential integrity; service-role writes
 must not bypass publication policy.
 
 The existing placeholder is a **public roster pin, not a published private
 version**. Existing parties remain pinned to it and retain their current lobby
 behavior; do not attach a new solution to that identifier or silently repin.
-Proposed default: deny private-content/game-start reads for placeholder parties
-with a safe unavailable response. A separately reviewed migration or explicit
-owner-approved party recreation/upgrade policy is required before any change,
-including preserving assignments and handling already-disclosed dossiers.
+**Confirmed compatibility:** deny private-content/game-start reads for placeholder parties with a safe unavailable response. Create a separate new party for published private content; do not silently upgrade, repin or replace placeholder parties.
 
 ## Server read and authorization contract
 
@@ -181,6 +171,7 @@ version supplied by the browser as authority.
 | `getPublicRoster(partyId)` | Authenticated current member **or** owning host; existing public catalog may remain separately public | Pinned public identities and descriptions only |
 | `getHostOperations(partyId)` | Authenticated owning host | Safe roster, assignments, phase, readiness and released public scripts only; no dossiers, future text or solution |
 | `getMyStartingDossier(partyId)` | Current enrolled member with current assignment, including a playing host; published matching pin | Own pre-start dossier in `LOBBY` and thereafter; no arbitrary character parameter |
+| `getMyMurdererBriefing(partyId)` | Currently assigned participant whose character is the canonical murderer; only after committed ACT_1 briefing release, including a host only when enrolled/assigned | Own briefing only; never from host operations or in LOBBY |
 | `getReleasedContent(partyId)` | Current member or owning host, matching published pin and committed release state | Released public events/items; additionally only the current assigned member's released private items. Unassigned members and nonplaying hosts get no private items |
 | `getSolution(partyId)` | Current member or owning host, matching pin, committed authorized `REVEAL` or `COMPLETE` | Reveal projection only; not all dossiers or authoring package |
 
@@ -193,13 +184,15 @@ version supplied by the browser as authority.
 | Owning host, enrolled and assigned | Roster / host ops | Own only, including lobby | Public / own, after each committed release | Only after reveal |
 | Authenticated non-owner, non-member | Deny party reads | Deny | Deny | Deny |
 
+**Murderer briefing access:** every caller, including the murderer, is denied before the committed ACT_1 transition. At ACT_1 or later only the **current, legitimately assigned murderer participant** can read their briefing. An unassigned guest, nonplaying host or other participant cannot infer its existence or contents from public role lists, URLs, version identifiers or errors. This check belongs in the server-authorized projection, never client-side hiding.
+
 Even for a playing host, `getHostOperations` remains spoiler-free; the host
 obtains their own dossier only through the separate participant-authorized
 read. Neither host ownership nor a participant assignment expands the other
 projection's privileges.
 
 No phase check is satisfied by a URL, local clock, navigation, or mission
-completion. `LOBBY` has no released act items; `ACT_1`–`ACT_3` expose only
+completion. `LOBBY` has no released act items or murderer briefing; `ACT_1`–`ACT_3` expose only
 committed releases through the current phase, retaining earlier releases during
 pause and later phases. `ACCUSATIONS` does not expose solution; `REVEAL` and
 `COMPLETE` do only after the authorized reveal transition. Reassignment/removal
@@ -244,11 +237,14 @@ must fail. The client never receives the full package for filtering.
   signal, not a content-bearing push event. On change, fetch a fresh authorized
   projection; do not send private content through notifications, Realtime or
   broadcast channels. Stop polling on denied access, and recheck on reconnect.
+* **Private storage and integrity:** Test that ordinary browser Supabase identities, hosts and guests cannot read package objects directly; no public object URLs/signed URLs or private paths in serialized responses. Verify immutable digest, missing-object fail-closed behavior and continued old-version availability across new publication and app rollback.
 * **Privilege:** Service-role credentials stay server-only, never in
   `NEXT_PUBLIC_` variables, client bundles, logs or previews connected to
   production. Narrow RPCs/grants and input checks are required because service
   role bypasses RLS; direct browser database queries must not read private
   content or mutate releases.
+
+Future automated negative tests include a unique synthetic murderer guilt/method sentinel that is **absent even for the murderer in LOBBY** but present for the correctly assigned murderer after an authorized ACT_1 start. Also test denied direct private storage reads and prior version preservation.
 
 Future automated negative tests use synthetic, unique spoiler sentinels. Check
 unassigned guest and nonplaying host response bodies, HTML, RSC/prefetch and
@@ -270,13 +266,11 @@ timing, location/footprint consistency, injury findings, delayed recollection,
 clue classification, independent solvability, reveal balance, and incomplete
 objectives/relationships. Motive/method choices and related gameplay questions
 remain open. No new clues, answer options, objectives or story text are specified
-by this ADR. Owner approval of O-026/O-027 and spoiler/IP implications is a
-prerequisite to implementation; approval of content and release timing is
-separate.
+by this ADR. Owner decisions D-026–D-028 settle private future content, preserved versions and ACT_1 murderer timing; they **do not authorize private content publication, migration, or production setup**. Narrative/editorial signoff for O-009–O-016 remains separate.
 
 1. **Package boundary and validation:** After architecture/source approval,
-   implement server-only version registry, schemas, digest and safe projections
-   using synthetic fixtures, no real private publication. Specify published
+   implement private object loader, published-version registry, schema validation, digest and safe projections
+   using synthetic fixtures only, no real Blackwood publication; verify private bucket access and nonoverwriting publication behavior. Specify published
    version/pin constraints in a reviewed migration if needed; retain placeholder
    behavior. Acceptance: validation rejects invalid references/counts/phases
    and mutations, host-only projections, logs, bundles and responses exclude
@@ -293,7 +287,7 @@ separate.
    host transition. Proposed minimum readiness: eight distinct current enrolled
    participants each assigned a different one of the eight roles, including the
    host only if enrolled; any additional readiness conditions need owner review.
-   Acceptance: that minimum, no pre-start Act I leakage, concurrent/replayed
+   Acceptance: that minimum, no pre-start murderer guilt leakage, a committed ACT_1 briefing available only to the murderer, concurrent/replayed
    transitions and public/private release isolation tested with pgTAP and
    browser integration. No mission gate.
 4. **Later acts and reveal:** Separate small issues for each authorized phase
