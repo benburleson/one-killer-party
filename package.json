@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:unit": "node --experimental-default-type=module --experimental-strip-types --test tests/unit/*.test.mjs",
+    "publish:mystery:local": "node --experimental-strip-types scripts/publish-mystery.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
