@@ -30,9 +30,9 @@ Suggested initial rollout: manual issue assignment → automatic issue creation 
 
 ## Testing and PR evidence
 - CI should run lint, type checks and build for every PR.
-- Add Playwright smoke tests that produce screenshots, traces and HTML reports as downloadable CI artifacts.
+- Keep browser smoke and local-Supabase integration separate where their environments differ. Upload only reviewed, credential-safe, allowlisted evidence; do not publish arbitrary DOM, traces, test-result contexts or logs.
 - Configure Vercel PR preview deployments; include the exact preview URL in PR discussion.
-- Use a dedicated Supabase test project or isolated branches for integration testing; never target production from agent test runs.
+- Use the existing disposable local Supabase CI stack for integration testing; never target production from agent test runs.
 - CI pass and preview deployment success are independent gates; report missing or failed checks clearly.
 
 ## Human handoff checklist

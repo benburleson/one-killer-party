@@ -1,5 +1,27 @@
 # Automatically marking agent PRs ready for human review
 
+## Current status (2026-11-23)
+
+**A successful live promotion has not been verified.** M1.7 PR
+[#36](https://github.com/benburleson/one-killer-party/pull/36) passed current
+PR CI [run #89](https://github.com/benburleson/one-killer-party/actions/runs/45086012751),
+and that run has a nonempty `playwright-evidence` artifact. Promotion
+[run #89](https://github.com/benburleson/one-killer-party/actions/runs/45086128314)
+completed with a successful job status but its log says it skipped because it
+found no successful current CI run with evidence. The artifact list contradicts
+that skip reason; the cause is unresolved. PR #36 was subsequently merged by a
+human, not promoted by this run.
+
+The latest recorded permission failure was promotion
+[run #90](https://github.com/benburleson/one-killer-party/actions/runs/45086384293)
+for PR #34 on 2026-11-23: GitHub returned
+`Resource not accessible by integration` at the ready-for-review mutation.
+The cause remains unconfirmed and no token/permission workaround was applied.
+The current workflow has both an unexplained eligibility/evidence mismatch and
+a failed mutation; it must not be described as working reliably. See the
+dated [agent evaluation](agent-evaluation.md). Retain human readiness and
+merge control.
+
 ## Purpose and triggers
 
 [`promote-agent-pr.yml`](../.github/workflows/promote-agent-pr.yml) rechecks an agent draft when successful `CI` pull-request `workflow_run` completes **or** when an open draft is edited using `pull_request_target` (`edited` only). An edit before CI succeeds does not promote; a later successful CI completion rechecks. If CI passes while the title is WIP, a subsequent title/body edit rechecks without a CI rerun.
@@ -13,6 +35,15 @@ Both paths use the same eligibility checks against live GitHub metadata:
 5. Immediately before mutation, the PR is re-fetched and its open/draft state, identity, head, base, merge SHA, title and body are compared. Any change causes a skip.
 
 The workflow never reviews, approves or merges a PR. Human review and `main` branch protections remain mandatory.
+
+For docs-only changes, the Screenshots and browser evidence section may
+truthfully say that screenshots of changed UI are not applicable. A successful
+CI run still needs a nonempty `playwright-evidence` artifact; CI's real,
+credential-free landing-page smoke screenshot can satisfy that artifact
+requirement. Do not fabricate a docs screenshot, claim the landing-page image
+depicts the documentation, or bypass the gate. The workflow checks artifact
+metadata only, not its visual content; the reviewer remains responsible for
+evidence and change review.
 
 ## Security evaluation and limitations
 
@@ -28,7 +59,7 @@ A previous attempt to perform the mutation with the existing token failed with `
 
 ## Verification plan and manual matrix
 
-Unit tests (`npm run test:unit`) execute the workflow's inline script with mocked GitHub APIs; they do **not** exercise GitHub event delivery, token authorization, actual artifacts or concurrent GitHub mutations. The following matrix is a reproducible **planned manual test**, not an observed result. Perform it only after human security review and merge, with an independent subsequent Copilot PR and appropriate isolated test PRs. Record PR/run/artifact links, timestamps, state transitions and any human intervention in [agent-evaluation.md](agent-evaluation.md). Do not merge automatically.
+Unit tests (`npm run test:unit`) execute the workflow's inline script with mocked GitHub APIs; they do **not** exercise GitHub event delivery, token authorization, actual artifacts or concurrent GitHub mutations. The following matrix is a reproducible **planned manual test**, not an observed result. Run it only with human security review of the workflow and an independent Copilot PR plus appropriate isolated test PRs. Record PR/run/artifact links, timestamps, state transitions and any human intervention in [agent-evaluation.md](agent-evaluation.md). Do not merge automatically.
 
 | Setup/action | Expected observation |
 | --- | --- |
@@ -40,4 +71,4 @@ Unit tests (`npm run test:unit`) execute the workflow's inline script with mocke
 | Trigger overlapping CI and edit rechecks; change head/body during verification or mark ready manually | No duplicate transition; changed state is skipped if observed by the final read. Record any narrower last-read/mutation race. |
 | Inspect workflow logs and PR | Only intended mutation occurs; no checkout, approval, merge or protection changes. |
 
-If GitHub suppresses an edit event, rejects the mutation, or evidence expires before finalization, record the failure; a human can review and mark the PR ready. No independent post-merge demonstration of this change has yet been observed.
+If GitHub suppresses an edit event, rejects the mutation, or evidence expires before finalization, record the failure; a human can review and mark the PR ready. Bot-authored commits may not trigger a fresh CI run. `workflow_dispatch` is available on CI for diagnosis, but its run is not accepted by the current promotion gate, which requires a successful `pull_request` CI event. Rerunning a workflow for an older SHA does not validate a newer commit; verify the run's head SHA against the current PR before reporting a pass.

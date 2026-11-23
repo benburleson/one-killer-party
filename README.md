@@ -2,7 +2,7 @@
 
 **A murder-mystery party in your pocket — and a public experiment in autonomous, human-supervised software delivery.**
 
-One Killer Party is an in-person, phone-assisted murder-mystery experience. Guests interact face-to-face while the app handles game guidance, private information, clues and pacing. Alongside the product, this repository showcases an AI-assisted engineering lifecycle: **GitHub issue → coding agent → isolated branch → automated tests and evidence → PR ready for human review → human-controlled merge**.
+One Killer Party is an in-person, phone-assisted murder-mystery experience designed for guests to interact face-to-face while the app provides game guidance and pacing. Alongside the product, this repository showcases an AI-assisted engineering lifecycle: **GitHub issue → coding agent → isolated branch → automated tests and evidence → PR ready for human review → human-controlled merge**.
 
 ## What we're building
 
@@ -42,19 +42,19 @@ Product specification / GitHub issue
      Human-controlled merge
 ```
 
-**No automatic merge to `main`.** GitHub rules protect the default branch; agent-generated code and tests are proposals, not approvals.
+**No automatic merge to `main`.** Agent-generated code and tests are proposals, not approvals; human review and merge remain required.
 
 ## Current implementation
 
-The host-facing flow supports Supabase email magic-link sign-in, creation of a Blackwood Affair lobby, a one-time displayed eight-character invitation code, and host-only party access. Guest joining and recovery, role assignments, private dossiers, game progression and realtime play are **not yet implemented**.
+The repository's current application code supports host magic-link sign-in, Blackwood Affair lobby creation, guest join and host-assisted recovery, public role assignment, and spoiler-safe live lobby synchronization. The product remains in the `LOBBY` phase: private dossiers and game progression are not implemented. See the [product specifications](docs/product/product-vision.md) for confirmed scope and open decisions.
 
 - **Application:** https://app.onekillerparty.com (host page at `/host`)
 - **Marketing domain:** https://onekillerparty.com (also `www.onekillerparty.com`)
-- **Deployment:** Vercel; Supabase Auth and Postgres backing the live host flow
-- **Transactional email:** custom SMTP configured in hosted Supabase for authentication mail (owner-reported); see [production operations](docs/production-operations.md)
-- **Schema:** migrations `20261121030000` and `20261121040000` applied to the linked production Supabase project (owner-verified via CLI migration history)
+- **Stack:** Vercel, Supabase Auth/Postgres, and custom SMTP (owner-reported configuration); see [production operations](docs/production-operations.md)
+- **Merged implementation:** M1.5–M1.7 guest/lobby features are in the repository; M1.7 merged in [PR #36](https://github.com/benburleson/one-killer-party/pull/36).
+- **Production rollout:** M1.5/M1.6 remote migration state, production deployment of M1.5–M1.7, and post-M1.7 production smoke test are **not verified here**. M1.7 does not require a database migration. A merged PR or Vercel PR check is not production evidence; see the dated status table in [production operations](docs/production-operations.md).
 - **Local/CI integration:** disposable Supabase Docker stack; migration/RLS tests and local host-flow browser tests
-- **Delivery:** Copilot issue-to-PR development with required checks and human-reviewed merge
+- **Delivery:** Copilot issue-to-PR development with CI and human-reviewed merge
 
 For durable setup and security instructions, see [development environments](docs/development-environments.md), [lobby persistence](docs/architecture/lobby-persistence.md), [production operations](docs/production-operations.md), and [agent evaluation](docs/agent-evaluation.md). Past trials and incident diagnostics belong in GitHub PRs, CI runs and the evaluation log, not in this README.
 
@@ -82,7 +82,7 @@ npm run build
 npm run test:e2e -- --project=desktop-chromium --project=mobile-chromium
 ```
 
-Playwright tests use the production build (`npm run build` first). Screenshots and HTML reports appear under `test-results/` and `playwright-report/`. On PRs, download the `playwright-evidence` artifact from the GitHub Actions run (14-day retention).
+Playwright tests use the production build (`npm run build` first). Local screenshots and HTML reports appear under `test-results/` and `playwright-report/`; CI uploads only the allowlisted landing-page screenshot as `playwright-evidence` (14-day retention).
 
 **Fallback without a container:** install Node.js 22 and npm locally, run `npm ci`, then `npx playwright install --with-deps chromium` (Linux) or `npx playwright install chromium` (macOS). Run the same scripts above.
 

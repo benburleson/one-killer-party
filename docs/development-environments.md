@@ -26,7 +26,12 @@ npm run build
 npm run test:e2e -- --project=desktop-chromium --project=mobile-chromium
 ```
 
-Run Playwright against the intended local/ephemeral environment; inspect screenshot and trace artifacts for sensitive information. The GitHub Actions [CI workflow](../.github/workflows/ci.yml) runs the isolated Supabase database-security checks and browser smoke/integration coverage independently of the Codespace. It must not receive production database credentials.
+Run Playwright against the intended local/ephemeral environment. CI publishes
+only the browser evidence allowlisted by the workflow; do not upload arbitrary
+DOM, traces, test-result context, or logs that may contain sensitive data. The
+GitHub Actions [CI workflow](../.github/workflows/ci.yml) runs isolated
+Supabase database-security checks and separate smoke/integration coverage.
+It must not receive production database credentials.
 
 ## Copilot and previews
 

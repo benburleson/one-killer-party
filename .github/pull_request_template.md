@@ -5,20 +5,22 @@ Closes #
 - 
 
 ## Validation
+- [ ] `npm run test:unit`
 - [ ] `npm run lint`
 - [ ] `npx tsc --noEmit`
 - [ ] `npm run build`
-- [ ] Relevant automated tests (list below)
+- [ ] `npx supabase db reset --no-seed` and `npx supabase test db` (schema/auth changes; disposable local Supabase only)
+- [ ] Relevant Playwright/browser tests (list below)
 - [ ] Browser/manual checks (list below)
 
 ### Test results / limitations
 Provide actual results, not assumptions.
 
 ## Screenshots and browser evidence
-Attach screenshots or GitHub Actions artifact links for UI changes. State when not applicable or unavailable.
+For UI changes, attach real screenshots or credential-safe GitHub Actions evidence. For docs-only changes, state “not applicable” for changed-UI screenshots; link actual CI evidence where available. Never invent screenshots or upload arbitrary DOM, traces, or logs. Draft promotion still requires a successful current-SHA CI run with a nonempty `playwright-evidence` artifact.
 
 ## Preview deployment
-Vercel preview URL (or explain why unavailable):
+Verified Vercel preview URL (or explain why unavailable). A preview is not a production deployment:
 
 ## Risks, dependencies, and migration notes
 

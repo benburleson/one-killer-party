@@ -13,6 +13,25 @@
 
 The root/`www` marketing hosts must send **Host a party** visitors to `APP_URL + /host`. A browser tab left on `www.onekillerparty.com/host` will fail the app's intentional exact Origin check; start from the app subdomain. Do not weaken Origin validation to accommodate marketing-host posts.
 
+## M1.5–M1.7 rollout status (checked 2026-11-23)
+
+These are separate gates; a merged PR, successful CI run, or Vercel PR check
+does not establish the next one.
+
+| Milestone | Code merged | Production migration applied | Vercel Production deployed | Production smoke-tested |
+| --- | --- | --- | --- | --- |
+| M1.5 guest join/recovery | Yes; present in current main | **Unknown — owner verification required** (`20261122000000_guest_membership.sql`) | **Unknown — owner verification required** | **Unknown — owner verification required** |
+| M1.6 public role assignment | Yes; [PR #34](https://github.com/benburleson/one-killer-party/pull/34) merged 2026-11-22 | **Unknown — owner verification required** (`20261122010000_public_character_assignment.sql`) | **Unknown — owner verification required** | **Unknown — owner verification required** |
+| M1.7 lobby synchronization | Yes; [PR #36](https://github.com/benburleson/one-killer-party/pull/36) merged 2026-11-23 | **Not applicable**; polling uses existing RPCs | **Unknown — owner verification required** | **Unknown — owner verification required** |
+
+CI run [#90](https://github.com/benburleson/one-killer-party/actions/runs/45087065308)
+passed on the merged M1.7 `main` SHA. PR #36 also had a completed Vercel check,
+but that check does not verify the production target or a production smoke
+test. The earlier M1.3/M1.4 remote migration history is owner-reported in the
+repository; it does not establish M1.5/M1.6 rollout. Update this table only
+with a verified target, migration history, production deployment, and actual
+smoke-test evidence.
+
 ## Vercel Production environment
 
 | Variable | Purpose / handling |
@@ -28,11 +47,14 @@ After editing deployment environment variables, redeploy Production. Ensure the 
 
 - **Supabase Authentication → URL Configuration:** Site URL `https://app.onekillerparty.com`; allow the exact redirect `https://app.onekillerparty.com/auth/callback`. Do not indiscriminately allow wildcard preview domains.
 - **Provider:** Email magic-link / OTP sign-in enabled for hosts.
-- **Guest auth:** M1.5 requires Supabase anonymous sign-in. The local disposable
-  project enables it in `supabase/config.toml`; Production's Auth setting has
-  not been changed. Before releasing the reviewed M1.5 migration, obtain
-  separate owner approval and enable anonymous sign-in only for the intended
-  Production project. Do not enable it in previews unless they use an isolated,
+- **Guest auth preflight:** guest identity creation requires Supabase
+  **Authentication → Providers → Anonymous Sign-Ins** enabled for the intended
+  production project. The local disposable project enables it in
+  `supabase/config.toml`. The owner reported a prior production episode where
+  this setting was disabled and guest join misleadingly reported an
+  existing-account conflict. The current production setting is **unknown**:
+  verify it directly before any guest-join rollout and have the owner approve
+  any change. Do not enable it in previews unless they use an isolated,
   disposable Supabase project.
 - **Delivery:** The owner reports custom SMTP configured in Supabase, following the Resend setup for One Killer Party. Intended dedicated sending domain: `auth.onekillerparty.com` with sender `no-reply@auth.onekillerparty.com`; **verify actual sender/domain and provider settings in the Supabase and mail-provider dashboards before relying on them**. SMTP host, username, password/API key, DNS ownership records, verified sender, and sending limits are managed in the providers' dashboards, **not in GitHub or Vercel client variables**.
 - **DNS:** Keep sender-domain SPF/DKIM records as instructed by the email provider; avoid changing inbound MX records for the apex domain unless explicitly required. Check sender-domain verification, bounce/delivery diagnostics and provider sending limits.
@@ -52,27 +74,36 @@ Troubleshooting: Vercel server log events tagged `host_magic_link` contain safe 
 
 Migrations are committed under `supabase/migrations/` and reviewed alongside their related PR. The owner confirmed `20261121030000_lobby_persistence.sql` and `20261121040000_host_party_commands.sql` were applied to the linked production Supabase project, and both versions appeared in the remote migration history.
 
-`20261122010000_public_character_assignment.sql` is an M1.6 production
-migration and is **not authorized for production by this PR**. It backfills
-only the eight public role IDs for parties pinned to
+`20261122010000_public_character_assignment.sql` is the M1.6 production
+migration, merged with [PR #34](https://github.com/benburleson/one-killer-party/pull/34).
+Its application to Production is **unknown**; merging did not authorize it.
+It backfills only the eight public role IDs for parties pinned to
 `blackwood-affair` / `first-playtest-placeholder-v1`, updates the existing
 party-creation RPC to register those IDs for newly created parties, and adds
 the assignment and safe-read RPC projections. It does not add story content.
 All migration and integration tests must use the disposable local Supabase
 project; do not link or reset the production database.
 
-For this and other future production changes:
+For M1.5/M1.6 and other future production changes:
 
 1. Explicitly verify the linked **target project and environment**; inspect the target database and existing migration history. Plan backup/restore and rollback for destructive or data-changing operations.
-2. Review migration SQL and compare what would apply with `npx supabase migration list --remote` and `npx supabase db push --dry-run --remote`.
-3. Obtain specific human approval **for this migration** before using `npx supabase db push --remote`; review the CLI's exact target and migration list again at confirmation. Production DB migration must complete before the application rollout that uses the new RPCs.
-4. Verify remote migration history and app functionality after deployment. Record links and any incident in durable issue/PR evidence.
+2. Review migration SQL, especially every introduced or modified RPC; compare the verified target with `npx supabase migration list --remote` and `npx supabase db push --dry-run --remote`.
+3. Obtain specific human approval **for this migration** before using `npx supabase db push --remote`; review the CLI's exact target and migration list again at confirmation. Apply and verify required production migrations **before** deploying an app version that depends on their RPCs.
+4. Verify remote migration history, the actual Vercel Production deployment, and the production smoke test separately. Record links, timestamps, and any incident in durable issue/PR evidence.
 
-**Never** run a remote/linked database reset, migrations from unreviewed agent code, or automated integration tests against Production. Local tests use `npx supabase db reset --no-seed` and `npx supabase test db` against disposable Docker Supabase only.
+**Never** let Copilot, PR CI, or a test workflow migrate/reset Production. Never run a remote/linked database reset, migrations from unreviewed agent code, or automated integration tests against Production. Local tests use `npx supabase db reset --no-seed` and `npx supabase test db` against disposable Docker Supabase only.
 
 ## Current limits and unfinished work
 
-M1.4 supplies host authentication, party creation, invitation issuance/rotation and a host-safe lobby. M1.5 guest joining, lobby admission, removal and host-assisted recovery are implemented in a pending migration and application change; they are not deployed to Production, and the shareable invitation URL does not admit players there until separately approved and applied. Supabase sessions from a recovered guest's lost browser cannot be globally revoked by this app because the supported admin sign-out call requires that session's JWT; rebinding and tombstoning remove that old principal's access to the recovered participant, but its access token may remain authenticated until expiry. M1.6 public role assignment is implemented in this branch but remains unavailable in Production until the separately human-approved database migration and app rollout. Realtime/reconnect (M1.7) and private gameplay data are not available.
+The merged app supports M1.5 guest joining, removal and host-assisted recovery;
+M1.6 public assignments; and M1.7 spoiler-safe polling/reconciliation. Their
+production migration/deployment/smoke status is recorded separately above.
+M1.7 uses authenticated polling, not Supabase Realtime, and adds no migration.
+Private dossiers and game progression are not implemented. Supabase sessions
+from a recovered guest's lost browser cannot be globally revoked by this app
+because the supported admin sign-out call requires that session's JWT;
+rebinding and tombstoning remove that old principal's access to the recovered
+participant, but its access token may remain authenticated until expiry.
 
 Production backups/restore rehearsal, retention, dedicated preview Supabase isolation, SMTP deliverability beyond owner test addresses, and anonymous-signup abuse monitoring still require verification/decisions (O-025, O-029). The database-backed rate limiter is distributed across app instances, but its principal fallback and forwarded-address proxy assumptions require monitoring before public promotion. This runbook records configuration and owner-reported results, not independent credentials inspection or permission for future production changes.
 
@@ -87,8 +118,13 @@ and recovery requests. The challenge token is submitted to our Next.js server
 action as `cf-turnstile-response`, then passed to Supabase's
 `signInWithOtp({ options: { captchaToken } })` or
 `signInAnonymously({ options: { captchaToken } })` when an anonymous guest
-identity must be created. **Supabase validates and consumes this token.** Do
-not also call Cloudflare Siteverify with the same token in the Next.js action.
+identity must be created. The browser widget issues the token; the Next.js
+server action forwards it to Supabase Auth, which validates and consumes it.
+Do not also call Cloudflare Siteverify with the same token in the action.
+
+The join/recovery screen mounts one flow and one Turnstile widget at a time.
+Switching flows unmounts the inactive form; do not render duplicate widgets or
+reuse a token across actions.
 
 Set `NEXT_PUBLIC_TURNSTILE_SITEKEY=0x4AAAAAAGNYu6Zb0_5s2c2h` in
 Vercel Production (the source has this sitekey as a fallback).

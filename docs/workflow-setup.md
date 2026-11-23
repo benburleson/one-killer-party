@@ -23,8 +23,8 @@ This document is a reproducible runbook, **not a statement that all account-leve
 ## Phase 2: independent CI and browser evidence
 
 1. Verify the GitHub Actions `CI` workflow has green lint, type-check, and build jobs on a clean checkout.
-2. Add Playwright smoke tests for public landing page, then multiplayer flows.
-3. On pull requests, publish Playwright screenshots, traces and HTML reports as GitHub Actions artifacts. Apply retention limits and avoid sensitive player data in artifacts.
+2. Keep the public landing-page browser smoke test separate from the local-Supabase multiplayer integration job.
+3. Publish only credential-safe screenshots/evidence allowlisted for each job. Do not upload arbitrary DOM, error-context files, traces, or logs that may contain credentials. Keep retention limits.
 4. Post a reviewer-readable PR summary that links to real artifacts and test output; never claim tests that did not run.
 5. Define an explicit CI failure policy: agent attempts limited repairs, then stops and reports a blocker rather than looping indefinitely.
 
@@ -81,3 +81,37 @@ The intended policy is **unattended CI but attended merge**. Disabling Copilot w
 5. Future security or permissions modifications subject to separate human approval before merge.
 
 If a later trial reveals another approval gate, record which GitHub setting or workflow triggered it before changing security policy.
+
+## Current workflow map and review (2026-11-23)
+
+| Workflow | Triggers and jobs | Permissions / boundary | Review outcome |
+| --- | --- | --- | --- |
+| [`ci.yml`](../.github/workflows/ci.yml) | `pull_request` to `main`, `push` to `main`, `workflow_dispatch`; independent local DB/RLS, lint-unit-type-build, CodeQL, browser smoke, and local-Supabase integration jobs | Default `contents: read`; only CodeQL adds `security-events: write` and `actions: read`. Supabase is disposable/local. No production credentials. | Preserved job and trigger boundaries. Startup failures now report only exit/Docker/container-state categories; allowlisted integration evidence warns if absent instead of adding a second failure. |
+| [`copilot-setup-steps.yml`](../.github/workflows/copilot-setup-steps.yml) | Manual dispatch, or push/PR touching only this workflow; installs Node 22, npm dependencies, Chromium | `contents: read`; no production credentials | No change; setup remains separate from CI and Codespaces. |
+| [`promote-agent-pr.yml`](../.github/workflows/promote-agent-pr.yml) | `workflow_run` after CI completion and `pull_request_target` for edits to a draft | `actions: read`, `contents: read`, `pull-requests: write`; trusted workflow does not checkout or execute PR code | No eligibility, permission, artifact-trust, or trigger change. See [promotion policy](pr-auto-promotion.md) for the observed evidence mismatch and mutation failure. |
+
+CI's check/job names are visible in Actions, but this repository review could
+not inspect GitHub branch-protection/ruleset settings. The owner must verify
+which checks are required in Settings; do not infer them from workflow YAML.
+No path filters, automatic merge, permission expansion, or production access
+was added. Concurrency and event triggers are unchanged.
+
+**Before/after:** the two local Supabase startup steps previously discarded
+all output, including the distinction between an unavailable Docker daemon and
+a CLI/container startup failure. They still suppress raw output and now emit
+only categorical diagnostics on failure. Integration screenshot upload
+previously used `if-no-files-found: error`; it now warns if an earlier failure
+prevented evidence creation. The promotion eligibility rule remains unchanged:
+the `playwright-evidence` name and nonempty requirement are preserved, while
+its payload is narrowed to the landing-page screenshot rather than all test
+results and HTML reports. Human review should confirm this allowlist remains
+credential-free. No promotion permission, trigger, or readiness-rule change
+is proposed.
+
+The PR template's headings match the promotion parser: `Validation`,
+`Screenshots and browser evidence`, and `Human verification steps`. For a
+docs-only PR, state that changed-UI screenshots are not applicable; do not
+fabricate a screenshot. Promotion still requires a successful current-SHA CI
+run with a nonempty `playwright-evidence` artifact, which can be the real
+credential-free landing-page smoke evidence. It is not a screenshot of the
+documentation and does not replace human review.

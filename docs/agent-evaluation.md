@@ -84,3 +84,47 @@ Advance from human-created issues to automated issue creation only after the age
 | Safety | All database work used disposable local Supabase and deterministic synthetic identities. No hosted Supabase project, production data, or cloud credentials were used; generated local state was removed/ignored |
 | Outcome | PR #19 remains a draft for human review and human-only merge |
 | Learning | Keep startup output suppressed to protect generated local keys, and make the all-deny RLS decision explicit until reviewed server projections and commands exist |
+
+## M1.5–M1.7 rollout and handoff evidence (2026-11-23)
+
+**Evidence:** [guest UX PR #32](https://github.com/benburleson/one-killer-party/pull/32) · [M1.6 PR #34](https://github.com/benburleson/one-killer-party/pull/34) · [M1.7 PR #36](https://github.com/benburleson/one-killer-party/pull/36) · [merged-main CI run #90](https://github.com/benburleson/one-killer-party/actions/runs/45087065308)
+
+- PR #32 records a guest-join failure-classification fix: an earlier generic
+  error mislabeled all anonymous sign-in failures as an existing account.
+  The owner later reported a production anonymous-sign-in configuration
+  failure that produced this misleading symptom. PR #32 says the setting was
+  enabled when that PR was checked; the current production setting is not
+  independently verified. Do not infer the original Auth cause from the UI
+  message. Turnstile issues a browser token; Supabase Auth validates/consumes
+  it server-side. Join and recovery render one widget at a time.
+- M1.6 CI run [#83](https://github.com/benburleson/one-killer-party/actions/runs/45082762821)
+  failed desktop/mobile integration at the safe stage label “stale version is
+  rejected.” The wrapper deliberately omitted raw Playwright details; the
+  workflow uploaded only allowlisted screenshots. M1.7 integration runs
+  [#87](https://github.com/benburleson/one-killer-party/actions/runs/45084529130)
+  and [#88](https://github.com/benburleson/one-killer-party/actions/runs/45085144146)
+  later exposed safe stage labels for assignment confirmation and stale
+  version rejection; the final PR CI [#89](https://github.com/benburleson/one-killer-party/actions/runs/45086012751)
+  passed. The merged `main` SHA then passed CI run #90. These failures are
+  evidence of debugging iterations, not a basis for claiming older-SHA runs
+  validate a later commit.
+- Promotion is **not verified working**: PR #36 had successful CI run #89 and
+  a nonempty evidence artifact, but promotion [run #89](https://github.com/benburleson/one-killer-party/actions/runs/45086128314)
+  logged a skip claiming no successful current CI run with evidence. The
+  Actions artifact list for CI [run #89](https://github.com/benburleson/one-killer-party/actions/runs/45086012751)
+  shows that artifact existed; the mismatch is unexplained. A human later
+  merged PR #36. A later PR #34 promotion [run #90](https://github.com/benburleson/one-killer-party/actions/runs/45086384293)
+  failed with `Resource not accessible by integration`. Its cause remains
+  unconfirmed; permissions were not broadened. Do not rely on automation for
+  readiness or merge.
+- The CI workflow's Supabase startup output was fully suppressed, preventing
+  diagnosis of an intermittent startup failure reported by the owner. No
+  startup failure was established in the runs reviewed here; the workflow now
+  emits only failure-only Docker reachability and container-state categories.
+  Integration screenshot upload now warns if an earlier failure produced no
+  allowlisted screenshots. No DOM, trace, credentials, or raw CLI output is
+  added to the artifact.
+- Production status remains unverified: the repo and CI establish merged code
+  and tests, not M1.5/M1.6 remote migration application, production deployment,
+  or a post-M1.7 production smoke test. PR #36's Vercel check was not verified
+  as a production deployment. See the production-operations status table.
