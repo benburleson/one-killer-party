@@ -22,7 +22,9 @@ without printing them. The operator publisher is local-only and uses the
 disposable project's anon key plus JWT secret to create a five-minute
 `mystery_operator` token; it does not use the runtime service-role key. Keep
 any authored JSON input outside the repository. For a manually approved
-synthetic package, set `SUPABASE_URL`, `SUPABASE_ANON_KEY` and
+synthetic package, note that `--approved-by` and `--approval-reference` are
+local provenance labels, not independent publication approval. Set
+`SUPABASE_URL`, `SUPABASE_ANON_KEY` and
 `SUPABASE_JWT_SECRET` in a private local shell environment and run the
 documented `publish:mystery:local` command in the
 [package contract](architecture/mystery-content-package.md). Never use linked

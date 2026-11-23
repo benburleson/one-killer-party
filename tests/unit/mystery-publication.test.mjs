@@ -21,6 +21,7 @@ function localAuthorization({
 } = {}) {
   return {
     target: "local",
+    projectRef: "local",
     artifact: { localTestApproval: true },
     async verify(_artifact, binding) {
       return approved ? {
@@ -239,7 +240,7 @@ test("does not register an object whose independent read-back differs from the s
   assert.equal(registered, false);
 });
 
-test("requires a fresh verifier result bound to the exact target, identity, digest and rule set", async () => {
+test("requires a fresh, exact-bound verifier result and rejects revoked or untrusted issuers", async () => {
   const packageOne = syntheticMysteryPackage();
   packageOne.mysteryId = "synthetic-approval";
   packageOne.version = "local-v1";
@@ -248,8 +249,32 @@ test("requires a fresh verifier result bound to the exact target, identity, dige
     localAuthorization({ approved: false }),
     localAuthorization({ expiresAt: new Date(Date.now() - 1000).toISOString() }),
     localAuthorization({ approvedAt: new Date(Date.now() + 60_000).toISOString() }),
+    {
+      target: "local",
+      projectRef: "local",
+      artifact: { issuer: "untrusted-issuer" },
+      async verify(artifact) {
+        return artifact.issuer === "owner-approved-issuer" ? {} : null;
+      },
+    },
+    {
+      target: "local",
+      projectRef: "local",
+      artifact: {},
+      async verify(_artifact, binding) {
+        return {
+          ...metadata,
+          binding,
+          approvedAt: { toString() { throw new Error("raw approval details"); } },
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        };
+      },
+    },
     localAuthorization({
       bindingFor: (binding) => ({ ...binding, target: "production" }),
+    }),
+    localAuthorization({
+      bindingFor: (binding) => ({ ...binding, projectRef: "different-project" }),
     }),
     localAuthorization({
       bindingFor: (binding) => ({ ...binding, digestSha256: "0".repeat(64) }),
@@ -259,6 +284,7 @@ test("requires a fresh verifier result bound to the exact target, identity, dige
     }),
     {
       target: "local",
+      projectRef: "local",
       artifact: {},
       async verify() {
         throw new Error("raw provider details and secret");
@@ -266,12 +292,14 @@ test("requires a fresh verifier result bound to the exact target, identity, dige
     },
   ]) {
     const store = memoryStore();
-    assert.deepEqual(await publishMysteryDefinition(
+    const result = await publishMysteryDefinition(
       packageOne,
       EIGHT_ROLE_PROTOTYPE_RULES,
       authorization,
       store,
-    ), { ok: false, code: "INVALID_APPROVAL" });
+    );
+    assert.deepEqual(result, { ok: false, code: "INVALID_APPROVAL" });
+    assert.doesNotMatch(JSON.stringify(result), /raw approval details|untrusted-issuer/);
     assert.equal(store.objects.size, 0);
     assert.equal(store.registry.size, 0);
   }

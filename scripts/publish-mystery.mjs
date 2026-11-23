@@ -95,6 +95,7 @@ async function main() {
   };
   const authorization = {
     target: "local",
+    projectRef: "local",
     artifact: approvalMetadata,
     async verify(artifact, binding) {
       if (binding.target !== "local" || artifact !== approvalMetadata) return null;
