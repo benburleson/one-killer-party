@@ -9,9 +9,8 @@ owner-reported. See [production operations](../production-operations.md) for
 the dated rollout table and human-approved deployment procedure. All
 **automated tests** use disposable local Supabase only.
 
-For the proposed boundary between lobby state and future private content, see
-[mystery content architecture](mystery-content-architecture.md); it does not
-change the current lobby or authorize publication.
+For the **accepted design boundary** between lobby state and future private content, see
+[mystery content architecture](mystery-content-architecture.md): private immutable object packages, restricted Postgres registry and party/release state, with server-only authorized projections. Decisions D-026–D-028 do not change the current lobby or authorize private publication.
 
 ## Schema boundary
 
@@ -108,9 +107,8 @@ to that credential permits impersonation and must be restricted accordingly.
   Role assignment is `LOBBY`-only. This migration adds no game-start state,
   dossier access, clue release or solution data.
 
-O-025's backup/restore, retention and isolation decisions are not fully
-settled. O-026 (private mystery storage) and O-027 (public story/repository
-policy) remain open. Do not infer that PR previews are connected to a safe
+O-025's backup/restore, retention and preview isolation decisions are not fully
+settled. D-026–D-028 settle future private storage, preserved content versions and ACT_1 murderer briefing timing; O-033 leaves **existing public spoiler history** remediation open. Do not infer that PR previews are connected to a safe
 dedicated Supabase project or that merged migrations are applied remotely.
 
 ## Lobby synchronization
