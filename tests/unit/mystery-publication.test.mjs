@@ -112,6 +112,16 @@ test("fails closed for missing, corrupt, mismatched, unpublished, and legacy ref
     download: store.download,
   });
   assert.deepEqual(mismatch, { ok: false, code: "CONTENT_UNAVAILABLE" });
+  for (const mismatched of [
+    { ...store.registry.get("synthetic-local/local-v1"), mystery_id: "another-mystery" },
+    { ...store.registry.get("synthetic-local/local-v1"), object_path: "another-mystery/other-version/object.json" },
+    { ...store.registry.get("synthetic-local/local-v1"), unexpected_field: "malformed" },
+  ]) {
+    assert.deepEqual(await loadTrustedPublishedMystery(published.ref, {
+      lookup: async () => [mismatched],
+      download: store.download,
+    }), { ok: false, code: "CONTENT_UNAVAILABLE" });
+  }
 
   assert.deepEqual(await loadTrustedPublishedMystery({ ...published.ref, digestSha256: "0".repeat(64) }, store), {
     ok: false,
@@ -121,6 +131,14 @@ test("fails closed for missing, corrupt, mismatched, unpublished, and legacy ref
     lookup: async () => [],
     download: store.download,
   }), { ok: false, code: "CONTENT_UNAVAILABLE" });
+  assert.deepEqual(await loadTrustedPublishedMystery(published.ref, {
+    lookup: store.lookup,
+    download: async () => { throw new Error("storage details"); },
+  }), { ok: false, code: "CONTENT_UNAVAILABLE" });
+  assert.deepEqual(await loadTrustedPublishedMystery({ ...published.ref, schemaVersion: 2 }, store), {
+    ok: false,
+    code: "CONTENT_UNAVAILABLE",
+  });
   assert.deepEqual(await loadTrustedPublishedMystery({
     mysteryId: "blackwood-affair",
     version: "first-playtest-placeholder-v1",
@@ -180,4 +198,23 @@ test("does not replace conflicting object bytes and requires explicit non-secret
     ok: false,
     code: "OBJECT_CONFLICT",
   });
+});
+
+test("does not register an object whose independent read-back differs from the sealed bytes", async () => {
+  const packageOne = syntheticMysteryPackage();
+  packageOne.mysteryId = "synthetic-corrupt";
+  packageOne.version = "local-v1";
+  let registered = false;
+  const result = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, {
+    async upload() {},
+    async download() {
+      return new Uint8Array([0x7b, 0x7d]);
+    },
+    async register() {
+      registered = true;
+      return "published";
+    },
+  });
+  assert.deepEqual(result, { ok: false, code: "READBACK_MISMATCH" });
+  assert.equal(registered, false);
 });

@@ -25,7 +25,10 @@ export type TrustedPackageLoadResult =
 function isRegistryRecord(value: unknown): value is RegistryRecord {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return typeof record.mystery_id === "string" &&
+  const keys = Object.keys(record).sort();
+  return keys.length === 6 &&
+    keys.join(",") === "digest_sha256,mystery_id,object_path,rule_set_id,schema_version,version" &&
+    typeof record.mystery_id === "string" &&
     typeof record.version === "string" &&
     typeof record.schema_version === "number" &&
     typeof record.digest_sha256 === "string" &&

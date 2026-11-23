@@ -28,7 +28,9 @@ export type PublicationResult =
   | Readonly<{ ok: true; ref: PublishedVersionRef; status: "published" | "already_published" }>
   | Readonly<{ ok: false; code: PublicationFailureCode }>;
 
-const SAFE_METADATA = /^[A-Za-z0-9][A-Za-z0-9._:/#@-]{0,127}$/;
+const SAFE_PROVENANCE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const SAFE_APPROVER = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,79}$/;
+const SAFE_APPROVAL_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._#:/-]{0,119}$/;
 const equalBytes = (left: Uint8Array, right: Uint8Array) =>
   left.length === right.length && left.every((byte, index) => byte === right[index]);
 
@@ -42,9 +44,9 @@ export async function publishMysteryDefinition(
   metadata: PublicationMetadata,
   store: PublicationStore,
 ): Promise<PublicationResult> {
-  if (!metadata || !SAFE_METADATA.test(metadata.provenance) ||
-      !SAFE_METADATA.test(metadata.approvedBy) ||
-      !SAFE_METADATA.test(metadata.approvalReference)) {
+  if (!metadata || !SAFE_PROVENANCE.test(metadata.provenance) ||
+      !SAFE_APPROVER.test(metadata.approvedBy) ||
+      !SAFE_APPROVAL_REFERENCE.test(metadata.approvalReference)) {
     return { ok: false, code: "INVALID_APPROVAL" };
   }
   if (rules.id !== "eight-role-prototype-v1") return { ok: false, code: "INVALID_PACKAGE" };

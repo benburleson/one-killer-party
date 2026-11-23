@@ -41,14 +41,18 @@ SELECT ok(
   'only trusted server credentials can resolve a published reference'
 );
 SELECT ok(
-  NOT pg_catalog.has_table_privilege('anon', 'storage.objects', 'SELECT, INSERT, UPDATE, DELETE')
-  OR EXISTS (
+  EXISTS (
     SELECT 1 FROM pg_catalog.pg_policies
     WHERE schemaname = 'storage' AND tablename = 'objects'
       AND policyname = 'private_mystery_packages_deny_browser_objects'
-      AND permissive = 'RESTRICTIVE'
+      AND permissive = 'RESTRICTIVE' AND roles @> ARRAY['anon', 'authenticated']::name[]
+  ) AND EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies
+    WHERE schemaname = 'storage' AND tablename = 'buckets'
+      AND policyname = 'private_mystery_packages_deny_browser_bucket_listing'
+      AND permissive = 'RESTRICTIVE' AND roles @> ARRAY['anon', 'authenticated']::name[]
   ),
-  'browser storage access is denied by grants or a restrictive package policy'
+  'browser roles are blocked from package objects and bucket listing'
 );
 SELECT ok(
   NOT pg_catalog.has_table_privilege('mystery_operator', 'storage.objects', 'UPDATE, DELETE')

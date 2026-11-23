@@ -74,9 +74,6 @@ USING (bucket_id = 'private-mystery-packages');
 CREATE POLICY private_mystery_operator_insert_objects
 ON storage.objects FOR INSERT TO mystery_operator
 WITH CHECK (bucket_id = 'private-mystery-packages');
-CREATE POLICY private_mystery_operator_read_bucket
-ON storage.buckets FOR SELECT TO mystery_operator
-USING (id = 'private-mystery-packages');
 
 CREATE FUNCTION private_mystery.prevent_published_object_mutation()
 RETURNS trigger

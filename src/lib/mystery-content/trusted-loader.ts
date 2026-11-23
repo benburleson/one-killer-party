@@ -1,6 +1,6 @@
 import "server-only";
 import type { PublishedVersionRef } from "./schema.ts";
-import { loadTrustedPublishedMystery } from "./trusted-loader-core.ts";
+import { loadTrustedPublishedMystery, PRIVATE_BUCKET } from "./trusted-loader-core.ts";
 import { serviceRoleClient } from "@/lib/supabase/service-client";
 
 export async function loadPublishedMysteryDefinition(ref: PublishedVersionRef) {
@@ -18,7 +18,7 @@ export async function loadPublishedMysteryDefinition(ref: PublishedVersionRef) {
         return data;
       },
       async download(path) {
-        const { data, error } = await client.storage.from("private-mystery-packages").download(path);
+        const { data, error } = await client.storage.from(PRIVATE_BUCKET).download(path);
         if (error || !data) throw new Error("unavailable");
         return new Uint8Array(await data.arrayBuffer());
       },
