@@ -114,8 +114,11 @@ SELECT is(
    WHERE n.nspname = 'public'
      AND p.prorettype <> 'pg_catalog.trigger'::regtype
      AND NOT (p.prosecdef
-       AND pg_catalog.has_function_privilege('service_role', p.oid, 'EXECUTE'))),
-  NULL, 'every public RPC is SECURITY DEFINER and callable by the service role'
+       AND CASE WHEN p.proname = 'publish_mystery_version'
+         THEN pg_catalog.has_function_privilege('mystery_operator', p.oid, 'EXECUTE')
+         ELSE pg_catalog.has_function_privilege('service_role', p.oid, 'EXECUTE')
+       END)),
+  NULL, 'every public RPC is SECURITY DEFINER and limited to its trusted role'
 );
 
 -- Cross-host and cross-party negative authorization for the roster commands.

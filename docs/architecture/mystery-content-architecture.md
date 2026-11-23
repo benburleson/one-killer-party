@@ -44,7 +44,7 @@ privileges.
 
 ## Architecture decision: private immutable packages, Postgres runtime state
 
-**Selected: private-object-store + Postgres hybrid**, not Copilot's initial server-bundled hybrid. Use an access-controlled **private Supabase Storage bucket** for versioned, immutable JSON mystery packages; a **restricted Postgres registry** stores only package identifiers, schema versions, SHA-256 digests, private object locators, publication provenance and approval metadata. Parties, assignments, identities, phases, releases and accusations remain authoritative in Postgres. The Next.js server alone accesses package bytes and constructs allowlisted public/host/participant projections after fresh database authorization.
+**Selected: private-object-store + Postgres hybrid**, not Copilot's initial server-bundled hybrid. Use an access-controlled **private Supabase Storage bucket** for versioned, immutable JSON mystery packages; a **restricted Postgres registry** stores only package identifiers, schema versions, SHA-256 digests, private object locators, publication provenance and approval metadata. Parties, assignments, identities, phases, releases and accusations remain authoritative in Postgres. Trusted operators publish package bytes; at runtime the Next.js server accesses them only through a trusted loader and must construct allowlisted public/host/participant projections after fresh database authorization.
 
 | Alternative | Strength | Reason not selected for the first prototype |
 | --- | --- | --- |
@@ -56,7 +56,9 @@ privileges.
 
 **Private-source policy (D-026):** Do not commit new private dossiers, murderer revelations, solution text or future clues to this public repo, SQL migrations, test fixtures, issues or PR discussions. Author them in an access-controlled private editorial source, reviewed by an authorized editor. The exact private editor/repository is an operational choice, not a dependency on the runtime. This repo may retain **synthetic** test packages and spoiler-free public metadata.
 
-**Publication path:** A trusted, operator-invoked publishing tool validates schema, eight-role references, act/audience classifications and editorial approval; canonicalizes exact package bytes; computes digest; uploads to a **private, non-overwriting object key** (mystery/version/digest); independently reads back and verifies checksum; then registers/publishes the version in Postgres. Registration and party pins are database-transactional; object upload itself is not, so failed registration leaves a nonpublished orphan for privileged cleanup. Never serve unpublished versions. No public bucket, browser read grant, browser signed URL, client-visible object locator or publicly exposed publishing endpoint. Restrict publishing permissions separately from normal game reads, audit publications, and prevent editing/replacing a published key even by application service code. Supabase service credentials can bypass RLS and require tight server/operator protection.
+**Publication path (M2.1b local-only implementation):** The operator CLI seals with the named eight-role rule set, uploads to a **private, non-overwriting object key** (`mystery/version/digest`), independently reads back and verifies exact bytes, then registers the immutable version. The registry row stores the exact `PublishedVersionRef`, canonical object path, rule-set ID, publication time, provenance and approval metadata. Package registration is transactional; object upload is not, so failed registration leaves an unregistered orphan for audited manual cleanup. No party digest pin or private game start is added in this milestone. Never serve unpublished versions. No public bucket, browser bucket/object access, browser signed URL, client-visible locator or publishing endpoint exists.
+
+The local publisher uses a dedicated non-login `mystery_operator` Postgres role with package-bucket object read/create and registration RPC privileges only; it receives no registry table access and no Storage update/delete privilege. The runtime `service_role` can call the exact-reference lookup but cannot call the registration RPC. Database triggers prevent API-level registry/object overwrite or deletion, including through `service_role`. `service_role` still bypasses RLS and can directly read private Storage objects, including orphans; the app must use the registry loader rather than raw object calls. Database owners/superusers can disable triggers and remain trusted. Production credential issuance, rotation, audit and target design are not implemented and require owner approval.
 
 **Preserved versions (D-027):** Every party keeps its exact pinned **published version and digest for its lifetime**, unaffected by new packages or Vercel releases. Corrections become new versions; do not mutate or upgrade existing parties, and do not fall back to latest if pinned object is missing. New parties can pin a newly approved version at creation. Retain published objects while referenced, including across deploy rollback, with durable object + database backup and restore, hash verification and schema compatibility checks. A missing/mismatched object fails closed with a safe unavailable response. Cache verified immutable package bytes only inside a trusted server, keyed by immutable version+digest; never cache user-specific authorization results across callers. For old application deployments unable to interpret a newer schema, prevent creating new parties using that schema until deployed code supports it, while existing party versions remain retrievable.
 
@@ -64,7 +66,7 @@ privileges.
 
 **Public-repo history cannot be retroactively private:** `docs/product/blackwood-affair.md` already includes spoiler text in public Git and historical commits. The decision protects **future private content**; it does not make those existing spoilers secret. Any removal/redaction from the public repository, handling of clones/caches or transfer to private editorial source is a **separate explicitly reviewed task**. Do not delete or rewrite existing canonical story in this ADR.
 
-**Operator prerequisites, not yet authorized:** create and secure the private storage bucket; define editorial source and publisher permissions; protect credentials; establish private test/preview isolation; backup/restore, retention and audit requirements; verify package registry/blob availability before rollout. No automatic CI or Copilot production publishing.
+**Production prerequisites, not yet authorized:** separately approve the target and migration; review the private bucket, restrictive browser policies, registry and RPC grants; define a dedicated operator credential issuance/rotation/revocation and audit process; rehearse compatible Postgres/Storage backup and restore; establish retention and verify every registry digest/object before rollout. Apply an approved schema before deploying dependent code. No production bucket, migration, publication, CI or Copilot publishing was performed for M2.1b.
 
 ## Proposed immutable package contract
 
@@ -283,19 +285,18 @@ objectives/relationships. Motive/method choices and related gameplay questions
 remain open. No new clues, answer options, objectives or story text are specified
 by this ADR. Owner decisions D-026–D-028 settle private future content, preserved versions and ACT_1 murderer timing; they **do not authorize private content publication, migration, or production setup**. Narrative/editorial signoff for O-009–O-016 remains separate.
 
-1. **Package boundary and validation:** *Split into M2.1a and M2.1b. M2.1a
-   (schema, validation, canonical encoding and digest as a pure module with
-   synthetic fixtures) is implemented; see the
-   [package contract](mystery-content-package.md). The loader, registry,
-   projections and storage checks below are M2.1b and are not started.*
-   With the approved architecture but without permission to provision production infrastructure,
-   implement private object loader, published-version registry, schema validation, digest and safe projections
-   using synthetic fixtures only, no real Blackwood publication; verify private bucket access and nonoverwriting publication behavior. Specify published
-   version/pin constraints in a reviewed migration if needed; retain placeholder
-   behavior. Acceptance: validation rejects invalid references/counts/phases
-   and mutations, host-only projections, logs, bundles and responses exclude
-   synthetic dossiers, future text and solution, and old pins fail closed.
-   Unit tests, build/chunk checks and local pgTAP for any migration.
+1. **Package boundary and private persistence:** *Split into M2.1a and M2.1b.
+   M2.1a's schema, validation, canonical encoding and digest remain a pure
+   module with synthetic fixtures; M2.1b adds local-only private storage,
+   immutable registry, operator publisher and exact-reference server loader.
+   See the [package contract](mystery-content-package.md). No projections,
+   party digest pin, game start, production provisioning or real Blackwood
+   publication are implemented.*
+   Local pgTAP and Storage integration verify browser denial, immutable
+   registration and objects, safe retry/orphans, exact-version loading, and
+   placeholder compatibility. M2.2 remains responsible for fresh party/member/
+   assignment authorization and allowlisted own-dossier projections. It must
+   not expose full packages through host operations, logs, bundles or responses.
 2. **Own pre-start dossier:** After editorial approval of spoiler-safe starting content, add server reads and UI for assigned participants only,
    including playing host. Add necessary version/digest and authorization RPC
    migration, not content in public SQL seeds. Acceptance: D-023, cross-role,

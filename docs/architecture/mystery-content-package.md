@@ -1,10 +1,10 @@
 # Mystery content package contract (schema version 1)
 
-**Status: implemented as a pure domain module (M2.1a).** Nothing in the
-application imports it yet. There is no storage, registry, loader route,
-publication tool, migration or gameplay behind it; those belong to M2.1b and
-later and need their own review. This document describes the code in
-[`src/lib/mystery-content/`](../../src/lib/mystery-content/). The
+**Status: M2.1a contract and M2.1b local-only persistence are implemented.**
+The pure domain files remain isolated; the trusted loader is not wired to
+application routes, server components, host operations or gameplay. No
+production storage, registry migration, publication or gameplay is authorized.
+This document describes the code in [`src/lib/mystery-content/`](../../src/lib/mystery-content/). The
 [mystery content architecture](mystery-content-architecture.md) (D-026–D-028)
 remains the governing design.
 
@@ -21,6 +21,12 @@ remains the governing design.
 
 The module depends only on Zod and `node:crypto`. It reads no files,
 environment variables or network, and has no Supabase or Next.js imports.
+
+M2.1b persistence is separate from that pure contract:
+`publication.ts` orchestrates sealing, immutable upload, read-back verification
+and registration through an injected store; `trusted-loader-core.ts` validates
+an exact registry result and bytes; `trusted-loader.ts` is the `server-only`
+Supabase adapter. No application code calls the loader yet.
 
 There is deliberately **no `index.ts` barrel**. `MysteryDefinition` is the
 complete private authoring package: it is not a response type and must never be
@@ -225,7 +231,8 @@ published version 1 packages.
 
 ## Handoff to M2.1b
 
-M2.1b is expected to build on this contract without changing it:
+M2.1b implements the local infrastructure below without changing this
+contract:
 
 - **Trusted loader.** Server-only. Reads the party's pinned `mysteryId`,
   `version`, `schemaVersion` and digest from Postgres, fetches the private
@@ -247,15 +254,128 @@ M2.1b is expected to build on this contract without changing it:
   need specific human approval under
   [production operations](../production-operations.md).
 
+## M2.1b private persistence (local only)
+
+Migration `20261123010000_private_mystery_packages.sql` creates the private
+`private-mystery-packages` bucket and a `private_mystery.published_versions`
+registry. The immutable unique key is `(mystery_id, version)`; the row also
+stores `schema_version`, `digest_sha256`, the canonical `object_path`,
+`rule_set_id`, `published_at`, `provenance`, `approved_by` and
+`approval_reference`. It contains no package content. The identity
+`blackwood-affair / first-playtest-placeholder-v1` is prohibited. Existing
+party pins and lobby tables are unchanged.
+
+The only object key is
+`{mysteryId}/{version}/{digestSha256}.json` in the fixed private bucket. Its
+segments come from the canonical M2.1a identity and digest. Storage upload uses
+`upsert: false`; SQL triggers reject object updates/deletes and registry
+updates/deletes, including attempts made with the Supabase `service_role`.
+The registry itself has no direct table grants. Browser roles receive no
+package bucket listing or object operation; restrictive storage policies also
+deny a future permissive browser policy for this bucket. The narrow registration
+RPC is callable only as `mystery_operator`; the exact-reference lookup RPC is
+callable only by `service_role` and the operator. Storage credentials never
+produce signed URLs.
+
+`mystery_operator` is a non-login Postgres role granted only package-bucket
+object `SELECT`/`INSERT` and publication RPC execution. The local CLI derives a
+short-lived JWT for that role from the **local** JWT secret; it does not use or
+receive the runtime `SUPABASE_SERVICE_ROLE_KEY`. The runtime server loader uses
+the app's existing service-role client for the exact-reference RPC and private
+object download. Supabase service-role credentials still bypass RLS and have
+broad Storage API powers; application code must not use them outside the
+server-only loader and narrow RPCs. Triggers protect against API-level
+overwrite/deletion, but a database owner/superuser can disable triggers or
+alter the schema. Production needs a separately controlled operator signing
+credential and privileged database administrators remain trusted.
+
+### Local operator publishing and trust boundary
+
+Only a disposable local Supabase target is implemented. Keep the synthetic or
+private JSON input **outside this repository** and expose local credentials
+only to the operator process. The CLI refuses a non-loopback URL, requires
+`--target local` plus explicit approval metadata and `--confirm-approval`,
+accepts only the named `eight-role-prototype-v1` rules, and logs only status,
+identity and digest. It does not report file paths, payloads, provider errors
+or credentials. Example (the variables must be set from the disposable local
+stack's status in a private shell environment; never copy status output into a
+PR or log):
+
+```sh
+npm run publish:mystery:local -- \
+  --target local \
+  --input /secure/outside-repository/synthetic-package.json \
+  --provenance synthetic:owner-review \
+  --approved-by local-operator \
+  --approval-reference issue-45 \
+  --confirm-approval
+```
+
+The sequence is upload exact sealed canonical bytes → independently download
+and call `loadVerifiedMysteryDefinition` → register the immutable identity.
+Identical retries re-read and verify existing bytes and return
+`already_published`; a differing digest for an existing version is rejected.
+Because object storage and Postgres are not one transaction, a failed readback
+or registration can leave an unregistered orphan. Such an object is not
+returned by the trusted loader. Retry only with identical bytes; if cleanup is
+needed, a privileged operator must first verify there is no registry reference
+then perform an audited manual cleanup under an approved maintenance procedure.
+There is deliberately no cleanup command in the app or publisher. A schema
+validator result proves format/rules only, not editorial correctness,
+spoiler-safety, provenance authenticity or human approval.
+
+`loadPublishedMysteryDefinition` accepts an exact `PublishedVersionRef`, looks
+up only that full identity, checks the registered rule set and canonical
+locator, downloads only the matching registry object, and reuses the M2.1a
+digest/canonical/schema validator. Invalid references, missing or malformed
+registry rows, missing objects, unsupported rules and any storage or content
+mismatch return only `{ ok: false, code: "CONTENT_UNAVAILABLE" }`. It never
+resolves latest. This loader is **not authorization to disclose**: M2.2 must
+first re-read the party's pin and status and authenticate the caller's current
+party membership/role from trusted database state, then construct a distinct
+allowlisted own-dossier projection with phase rules. It must not pass through
+the complete `MysteryDefinition`. No route, server action, server component,
+host flow or browser component invokes this loader in M2.1b.
+
+### Verification and production boundary
+
+`npm run test:integration:mystery` runs only after a disposable local Supabase
+stack is started. It invokes the operator CLI on synthetic fixtures, exercises
+concurrent identical publication, multiple versions, conflicts, failed
+registration/orphans, readback/loading, attempts to overwrite/delete with both
+operator and service-role credentials, and direct anon/authenticated Storage
+requests. `npx supabase test db` additionally checks grants, RLS, RPC roles,
+legacy exclusion and registry immutability. Tests must never use linked or
+production credentials.
+
+Back up Postgres registry state and private Storage objects together and
+restore them to the same point-in-time set. After restore, verify each registry
+digest against its object and retain every version pinned by a party. Orphans
+are excluded from loader lookup and require separately audited manual cleanup.
+
+No production bucket or migration was provisioned or applied for M2.1b. Before
+any future production rollout, an owner must separately approve: (1) the exact
+target and dry-run migration list; (2) private bucket, restrictive browser
+policies, registry/RPC grants and immutable triggers; (3) a separate operator
+credential issuance/rotation/revocation design and audit trail; (4) backup,
+retention and restore rehearsal; and (5) an explicitly approved publication
+dry run. Apply the reviewed schema before deploying code that depends on its
+RPCs. Verify migration history, object digest/retention, deployment SHA and a
+production smoke test separately. None is implied by these local tests.
+
 ## What the tests do and do not show
 
 The unit tests in `tests/unit/mystery-content.test.mjs` use a fully synthetic
 eight-role fixture with fabricated identifiers and filler text. They cover
-valid parsing, each rejection listed above, key-order independence, round trip,
-tampering, digest and identity mismatch, and the absence of authored text in
-diagnostics.
+schema and canonical integrity. `tests/unit/mystery-publication.test.mjs`
+checks exact sealing, retries, conflicts, orphan behavior and fail-closed
+loader validation. `tests/integration/mystery-content-local.test.mjs` uses
+disposable local Supabase to exercise the actual operator CLI, Storage policies,
+readback, service/operator write boundaries and direct anon/authenticated
+Storage requests. pgTAP validates grants, RLS, RPC roles and immutable rows.
 
-They are schema and integrity tests only. They do **not** show cross-user
-authorization, secrecy of HTTP responses, React Server Component payloads or
-client bundles, or private storage access control. Those are M2.1b and M2.2
-security integration tests.
+These local tests do not establish production configuration, editorial
+approval, authorization to disclose content to a party member, or secrecy of
+future HTTP/RSC/player projections. The loader is not wired to those surfaces.
+M2.2 must add fresh membership/assignment/phase authorization and allowlisted
+projections before any dossier delivery.

@@ -25,6 +25,7 @@ check establishes none of the later ones.
 | `20261122000000_guest_membership.sql`, `20261122010000_public_character_assignment.sql` | Applied | Owner attestation (issue #41, 2026-11-23) |
 | Guest join and recovery, public role assignment, lobby synchronization | Deployed and smoke-tested in Production | Owner attestation (issue #41, 2026-11-23) |
 | `20261123000000_browser_role_lockdown_and_join_pin.sql` | **Not applied** | Needs the approval procedure below; apply before deploying the app version that depends on it |
+| `20261123010000_private_mystery_packages.sql` | **Not applied; local-only for M2.1b** | No production bucket, schema, publication or deployment was requested or performed |
 
 **Owner attestation is not independent verification.** This repository holds
 no migration-history output, deployment SHA, date or smoke-test record for the
@@ -96,6 +97,60 @@ For every production change:
 4. Verify remote migration history, the actual Vercel Production deployment, and the production smoke test separately. Record links, timestamps, and any incident in durable issue/PR evidence.
 
 **Never** let Copilot, PR CI, or a test workflow migrate/reset Production. Never run a remote/linked database reset, migrations from unreviewed agent code, or automated integration tests against Production. Local tests use `npx supabase db reset --no-seed` and `npx supabase test db` against disposable Docker Supabase only.
+
+## Private mystery package storage (M2.1b)
+
+M2.1b adds a **local-only** private Storage bucket, restricted published
+registry, operator publication CLI and server-only exact-reference loader.
+The existing lobby placeholder remains `blackwood-affair /
+first-playtest-placeholder-v1`; it has no private package and no party pin or
+game-start behavior changed. The new migration and synthetic integration test
+must not be pointed at a linked or production project.
+
+The local database boundary separates a `mystery_operator` role (package
+object read/create and registration RPC only) from the runtime `service_role`
+(exact-reference lookup only; no registration RPC). Browser roles have no
+bucket listing/object access. Storage triggers reject update/delete through
+the REST API even for `service_role`, and registry rows are immutable. However,
+`service_role` bypasses RLS and can directly read Storage objects, including
+unregistered orphans, and can upload orphan objects. A database owner or
+superuser can disable triggers or alter the schema. The local CLI derives a
+short-lived custom-role JWT from the local project JWT secret. This is **not**
+a production operator credential design: the project signing secret is too
+broad to treat as a separately scoped production publisher credential.
+
+Before any production use, obtain separate human approvals for all of the
+following gates; none is approved by this issue or its local tests:
+
+1. **Target and dry run:** confirm the exact Supabase production project,
+   inspect current migration history and run a reviewed dry run. Verify the
+   expected migration order, including the still-unapplied
+   `20261123000000_browser_role_lockdown_and_join_pin.sql`.
+2. **Schema and Storage review:** review the fixed bucket name, nonpublic
+   settings, browser-deny policies, `mystery_operator` role, registry fields,
+   RPC execute grants, immutable triggers and administrator/superuser limits.
+3. **Credential separation:** approve a dedicated operator authorization,
+   issuance, rotation, revocation and audit strategy that does not distribute
+   the runtime service-role key or reuse a broad project JWT signing secret.
+   The production CLI must target only that approved credential boundary.
+4. **Backup and retention:** rehearse consistent Postgres registry and Storage
+   object backups/restores; verify restored objects against every registered
+   digest and retain versions pinned by parties. Define an owner-audited
+   procedure for orphan cleanup; ordinary operator/runtime API roles cannot
+   delete immutable package objects.
+5. **Explicit apply and publication approval:** obtain approval for the exact
+   target and migration, apply the reviewed schema before deploying dependent
+   application code, then separately approve any package's editorial
+   provenance/publication. Validator success is not editorial approval.
+6. **Independent verification:** after an owner-authorized operation, verify
+   migration history, deployment SHA, object digest/retention and production
+   smoke test separately. Record the evidence and rollback plan; a green CI
+   run, merged PR or owner attestation is not independent verification.
+
+M2.2 must separately implement fresh party/member/assignment authorization
+and an allowlisted own-dossier projection. Possessing or successfully loading
+a complete package never authorizes its disclosure. Do not wire this loader
+to a public route, host operation, server component props or player interface.
 
 ## Current limits and unfinished work
 
