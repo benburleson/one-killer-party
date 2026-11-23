@@ -26,9 +26,11 @@ public source secret. Do not copy the full Markdown into runtime or remove,
 move, encrypt or redact it as part of this ADR.
 
 ```text
-editor/source -> validated immutable package -> trusted server-only loader
-                                                   |
-browser <- minimal authorized projection <- server authorization <- party DB
+private editorial source -> validate + approve -> private immutable object
+                                                    |
+                                       trusted server-side package loader
+                                                    |
+browser <- allowlisted authorized projection <- server auth + party DB snapshot
    ^                                          |
    +-- authenticated polling: invalidation ---+
 ```
@@ -128,7 +130,7 @@ the reveal projection after the reveal gate.
 
 Before publication, validate the package schema, canonical ID format and
 uniqueness in each namespace; exactly eight distinct playable Blackwood roles
-and supported count `[8]`; one dossier per role; valid same-version character,
+and supported count `[8]`; one spoiler-safe starting dossier per role; exactly one ACT_1-only murderer briefing for the canonical culprit; valid same-version character,
 item, objective/relationship, culprit, motive and method references; allowed
 audiences, classifications and release phases; valid event ordering; and
 solution references. Reject unknown types/fields where they could introduce
@@ -136,10 +138,10 @@ unreviewed data. Verify digest over a defined canonical serialization of the
 complete package excluding the digest field itself. Check public fields for
 spoilers and review evidence classification, chronology, core clue coverage,
 and solvability independently of optional missions; automated validation alone
-cannot establish editorial truth or secrecy. The server-side package validator
-owns these content checks and runs on import and as a publication gate; each
-deployment must also verify the registered bytes and digest before serving a
-version. Database constraints independently enforce pin and publication
+cannot establish editorial truth or secrecy. The private publishing validator
+owns these content checks and runs before publication; the trusted server loader
+revalidates package schema and verifies stored bytes against the pinned digest
+before serving a version. Actual private content must not be imported by public source builds. Database constraints independently enforce pin and publication
 integrity, not editorial validation.
 
 A draft is mutable only before publication. Publication requires validation,
@@ -268,7 +270,7 @@ objectives/relationships. Motive/method choices and related gameplay questions
 remain open. No new clues, answer options, objectives or story text are specified
 by this ADR. Owner decisions D-026–D-028 settle private future content, preserved versions and ACT_1 murderer timing; they **do not authorize private content publication, migration, or production setup**. Narrative/editorial signoff for O-009–O-016 remains separate.
 
-1. **Package boundary and validation:** After architecture/source approval,
+1. **Package boundary and validation:** With the approved architecture but without permission to provision production infrastructure,
    implement private object loader, published-version registry, schema validation, digest and safe projections
    using synthetic fixtures only, no real Blackwood publication; verify private bucket access and nonoverwriting publication behavior. Specify published
    version/pin constraints in a reviewed migration if needed; retain placeholder
@@ -276,8 +278,7 @@ by this ADR. Owner decisions D-026–D-028 settle private future content, preser
    and mutations, host-only projections, logs, bundles and responses exclude
    synthetic dossiers, future text and solution, and old pins fail closed.
    Unit tests, build/chunk checks and local pgTAP for any migration.
-2. **Own pre-start dossier:** After editorial approval of starting content and
-   release timing, add server reads and UI for assigned participants only,
+2. **Own pre-start dossier:** After editorial approval of spoiler-safe starting content, add server reads and UI for assigned participants only,
    including playing host. Add necessary version/digest and authorization RPC
    migration, not content in public SQL seeds. Acceptance: D-023, cross-role,
    host isolation, removal/recovery/stale-JWT and cache tests pass on disposable
@@ -298,7 +299,7 @@ by this ADR. Owner decisions D-026–D-028 settle private future content, preser
 
 Each slice requires current-SHA independent CI, unit, lint, typecheck and build;
 schema/auth changes additionally require local pgTAP and relevant desktop/mobile
-Playwright. Review migrations, backups, exact target and rollback, then obtain
+Playwright. Review private object-store privileges and retained versions, migrations, **DB and object backups**, exact target and rollback, then obtain
 specific human approval before any production migration. Apply and verify
 approved schema before an app that depends on it; coordinate package
 availability/pins and retain rollback compatibility. Verify production
