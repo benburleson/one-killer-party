@@ -170,11 +170,13 @@ reference, package ID/version/schema, canonical digest and exact rule set. The
 production verifier must verify an owner-approved signed artifact or
 identity-backed approval, two distinct
 approver/operator identities (or an owner-approved equivalent), MFA, revocation,
-expiry and one-time or same-binding idempotent retry semantics. Its immutable
-approval ID/reference and identity/time evidence must be recorded in the
-registry/audit system. A bare `--approved-by` or `--approval-reference` is
-never authorization. Only an explicit local confirmation adapter exists; it
-is a mock/local workflow, not an independently verifiable production approval.
+expiry and idempotent verification only for the same binding. The publisher
+rechecks the same approval immediately before registry insertion, after upload
+and readback. Its immutable approval ID/reference and identity/time evidence
+must be recorded in the registry/audit system. A bare `--approved-by` or
+`--approval-reference` is never authorization. Only an explicit local
+confirmation adapter exists; it is a mock/local workflow, not an independently
+verifiable production approval.
 No Production publishing command is available until an owner selects and
 approves the issuer and approval provider. The CLI has no implicit target and
 rejects `production`.

@@ -93,18 +93,19 @@ async function main() {
     approvedBy: args.get("--approved-by"),
     approvalReference: args.get("--approval-reference"),
   };
+  const approvalCreatedAt = new Date();
+  const approvalExpiresAt = new Date(approvalCreatedAt.getTime() + 5 * 60 * 1000);
   const authorization = {
     target: "local",
     projectRef: "local",
     artifact: approvalMetadata,
     async verify(artifact, binding) {
       if (binding.target !== "local" || artifact !== approvalMetadata) return null;
-      const now = new Date();
       return {
         ...approvalMetadata,
         binding,
-        approvedAt: now.toISOString(),
-        expiresAt: new Date(now.getTime() + 5 * 60 * 1000).toISOString(),
+        approvedAt: approvalCreatedAt.toISOString(),
+        expiresAt: approvalExpiresAt.toISOString(),
       };
     },
   };

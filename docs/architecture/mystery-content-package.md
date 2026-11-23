@@ -328,8 +328,10 @@ mismatched, expired, future-dated or over-15-minute approvals before upload.
 A production verifier is not
 implemented. When selected, it must verify a tamper-resistant owner-approved
 artifact, distinct approver and operator identities (or an owner-approved
-equivalent), MFA, revocation and expiry, and one-time or same-binding retry
-semantics; record its stable approval reference and audit identity/time.
+equivalent), MFA, revocation and expiry, and idempotent verification only for
+the same binding. The publisher rechecks that approval immediately before
+registry insertion; record its stable approval reference and audit
+identity/time.
 Metadata-only approval is not accepted as production authorization.
 Because object storage and Postgres are not one transaction, a failed readback
 or registration can leave an unregistered orphan. Such an object is not

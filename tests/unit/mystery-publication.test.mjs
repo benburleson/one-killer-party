@@ -304,3 +304,32 @@ test("requires a fresh, exact-bound verifier result and rejects revoked or untru
     assert.equal(store.registry.size, 0);
   }
 });
+
+test("rechecks approval before registration so mid-publication revocation leaves only an orphan", async () => {
+  const packageOne = syntheticMysteryPackage();
+  packageOne.mysteryId = "synthetic-revoked";
+  packageOne.version = "local-v1";
+  const approvedAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  let checks = 0;
+  const store = memoryStore();
+  const result = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, {
+    target: "local",
+    projectRef: "local",
+    artifact: { approvalId: "synthetic-approval" },
+    async verify(_artifact, binding) {
+      checks += 1;
+      return checks === 1 ? {
+        ...metadata,
+        binding,
+        approvedAt,
+        expiresAt,
+      } : null;
+    },
+  }, store);
+
+  assert.deepEqual(result, { ok: false, code: "INVALID_APPROVAL" });
+  assert.equal(checks, 2);
+  assert.equal(store.objects.size, 1);
+  assert.equal(store.registry.size, 0);
+});

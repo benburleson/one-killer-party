@@ -100,6 +100,17 @@ function safelyValidApproval(
   }
 }
 
+function sameApproval(
+  left: VerifiedPublicationApproval,
+  right: VerifiedPublicationApproval,
+): boolean {
+  return left.provenance === right.provenance &&
+    left.approvedBy === right.approvedBy &&
+    left.approvalReference === right.approvalReference &&
+    left.approvedAt === right.approvedAt &&
+    left.expiresAt === right.expiresAt;
+}
+
 export function privateMysteryObjectPath(ref: PublishedVersionRef): string {
   return `${ref.mysteryId}/${ref.version}/${ref.digestSha256}.json`;
 }
@@ -164,7 +175,14 @@ export async function publishMysteryDefinition(
   if (!verified.ok || !equalBytes(bytes, sealed.bytes)) {
     return { ok: false, code: "READBACK_MISMATCH" };
   }
-  if (!safelyValidApproval(approval, binding, Date.now())) {
+  let refreshedApproval: VerifiedPublicationApproval | null;
+  try {
+    refreshedApproval = await authorization.verify(authorization.artifact, Object.freeze(binding));
+  } catch {
+    return { ok: false, code: "INVALID_APPROVAL" };
+  }
+  if (!safelyValidApproval(refreshedApproval, binding, Date.now()) ||
+      !sameApproval(approval, refreshedApproval)) {
     return { ok: false, code: "INVALID_APPROVAL" };
   }
 
