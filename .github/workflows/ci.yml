@@ -30,7 +30,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Start disposable local Supabase
-        run: npx supabase start >/dev/null 2>&1
+        shell: bash
+        run: |
+          if npx supabase start >/dev/null 2>&1; then
+            exit 0
+          else
+            exit_code=$?
+            echo "::error::Supabase CLI start failed (exit code ${exit_code}); raw output was suppressed."
+            if docker info >/dev/null 2>&1; then
+              echo "Docker daemon: reachable"
+            else
+              echo "Docker daemon: unavailable"
+            fi
+            container_states="$(docker ps -a --filter 'name=one-killer-party' --format '{{.Status}}' 2>/dev/null | head -n 12 || true)"
+            if [[ -n "$container_states" ]]; then
+              echo "Matching Supabase container states (status only):"
+              printf '%s\n' "$container_states"
+            else
+              echo "Matching Supabase container states: none reported"
+            fi
+            exit "$exit_code"
+          fi
       - name: Reset from migrations
         run: npx supabase db reset --no-seed
       - name: Run database security tests
@@ -109,14 +129,12 @@ jobs:
         run: npm run build
       - name: Run desktop and mobile Chromium smoke tests
         run: npm run test:e2e -- --project=desktop-chromium --project=mobile-chromium
-      - name: Upload Playwright evidence
+      - name: Upload allowlisted landing-page evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-evidence
-          path: |
-            test-results/
-            playwright-report/
+          path: test-results/**/landing-page.png
           if-no-files-found: warn
           retention-days: 14
 
@@ -138,7 +156,27 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Start disposable local Supabase
-        run: npx supabase start >/dev/null 2>&1
+        shell: bash
+        run: |
+          if npx supabase start >/dev/null 2>&1; then
+            exit 0
+          else
+            exit_code=$?
+            echo "::error::Supabase CLI start failed (exit code ${exit_code}); raw output was suppressed."
+            if docker info >/dev/null 2>&1; then
+              echo "Docker daemon: reachable"
+            else
+              echo "Docker daemon: unavailable"
+            fi
+            container_states="$(docker ps -a --filter 'name=one-killer-party' --format '{{.Status}}' 2>/dev/null | head -n 12 || true)"
+            if [[ -n "$container_states" ]]; then
+              echo "Matching Supabase container states (status only):"
+              printf '%s\n' "$container_states"
+            else
+              echo "Matching Supabase container states: none reported"
+            fi
+            exit "$exit_code"
+          fi
       - name: Reset from migrations
         run: npx supabase db reset --no-seed
       - name: Configure local-only credentials
@@ -181,7 +219,7 @@ jobs:
             test-results/**/guest-waiting-lobby.png
             test-results/**/host-safe-roster.png
             test-results/**/guest-session-preserved.png
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
       - name: Stop local Supabase and remove volumes
         if: always()

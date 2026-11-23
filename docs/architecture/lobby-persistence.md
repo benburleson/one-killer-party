@@ -1,6 +1,13 @@
 # Lobby persistence and host commands
 
-The M1.3 and M1.4 migrations are version-controlled in `supabase/migrations/`. The owner verified they were applied to the hosted production Supabase project; the M1.5 migration remains pending human review and separate production approval. All **automated tests** use disposable local Supabase only. See [production operations](../production-operations.md) for the authorized deployment procedure and domain/SMTP setup.
+M1.3–M1.7 implementation and schema are version-controlled in `supabase/`.
+M1.5 guest and M1.6 role-assignment code is merged; M1.7 polling uses the
+existing RPCs and adds no migration. The M1.5/M1.6 **remote migration,
+production deployment, and smoke-test states are unknown** until the owner
+verifies them. Earlier M1.3/M1.4 production migration history is
+owner-reported. See [production operations](../production-operations.md) for
+the dated rollout table and human-approved deployment procedure. All
+**automated tests** use disposable local Supabase only.
 
 ## Schema boundary
 
@@ -97,7 +104,10 @@ to that credential permits impersonation and must be restricted accordingly.
   Role assignment is `LOBBY`-only. This migration adds no game-start state,
   dossier access, clue release or solution data.
 
-Production migrations have been applied, but O-025's backup/restore, retention and isolation decisions are not fully settled. O-026 (private mystery storage) and O-027 (public story/repository policy) remain open. Do not infer that PR previews are connected to a safe dedicated Supabase project.
+O-025's backup/restore, retention and isolation decisions are not fully
+settled. O-026 (private mystery storage) and O-027 (public story/repository
+policy) remain open. Do not infer that PR previews are connected to a safe
+dedicated Supabase project or that merged migrations are applied remotely.
 
 ## Lobby synchronization
 
@@ -274,11 +284,15 @@ screenshots, test artifacts, or logs.
 The `Supabase migration and RLS tests` CI job starts a fresh local project on
 GitHub-hosted Ubuntu, resets from migrations without seeds, runs pgTAP tests,
 and removes its containers and volumes even after a failure. It needs no
-hosted Supabase credentials; startup output is suppressed so generated local
-keys are not put in Actions logs. A separate local-Supabase browser job tests
+hosted Supabase credentials. Startup output remains suppressed; on failure CI
+reports only the exit code, Docker-daemon reachability, and status-only output
+for matching project containers. A separate local-Supabase browser job tests
 the host/guest flow against disposable Supabase on desktop and mobile without
-capturing invitation, recovery or authentication data. The existing
-lint/type/build and landing-page Playwright jobs remain separate.
+capturing invitation, recovery or authentication data. Its evidence upload is
+allowlisted and warns, rather than failing a second time, if an earlier step
+failed before screenshots were created. The independent CodeQL, lint/type/
+build, and smoke jobs remain separate. See [workflow setup](../workflow-setup.md)
+for triggers, permissions, and required-check verification limits.
 
 Reviewers should confirm:
 

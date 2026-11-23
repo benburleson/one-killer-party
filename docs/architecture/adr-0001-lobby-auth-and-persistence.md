@@ -328,7 +328,7 @@ Nothing below changes the product decision register. Every item marked
 | O-004 → D-024/D-025 | **Approved:** eight Blackwood slots, duplicate names allowed with disambiguation, shared reusable eight-character invitation code/link while lobby open, host regeneration; cryptographic generation and abuse mitigation required. | M1.4 invitation creation and M1.5 joining |
 | O-005 → D-025 | **Approved:** pre-start removal/replacement/reassignment with confirmation; no new participants or ordinary reassignment after start; existing guest reconnect/recovery allowed. | M1.5 joining; M1.6 assignment; later game-state implementation |
 | O-006 → D-023 | **Approved:** public role at assignment, own starting private dossier before game starts; future-act content phase-gated. | M1.6 assignment/private content and M1.7 reconnect/realtime content |
-| O-025 | **Partially implemented:** migrations deployed to production and local/CI DB isolation in place; backup/restore, retention, preview isolation and future deployment approval remain open. | Production operations and future migrations |
+| O-025 | **Partially implemented:** M1.3/M1.4 migrations are owner-reported as deployed and local/CI DB isolation is in place; M1.5/M1.6 rollout status is unverified. Backup/restore, retention, preview isolation and future deployment approval remain open. | Production operations and future migrations |
 | O-026 | **Awaiting owner approval:** server-only mystery storage, publication/versioning and authoring access. | M1.6/M1.7 private-content delivery or a dedicated content issue |
 | O-027 | **Awaiting owner approval:** public repository and story/IP/spoiler boundary. | Any public story/content release, deployment or portfolio disclosure |
 
