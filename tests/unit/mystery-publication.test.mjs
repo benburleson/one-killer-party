@@ -12,6 +12,27 @@ const metadata = {
   approvalReference: "issue-45",
 };
 
+function localAuthorization({
+  bindingFor = (binding) => binding,
+  approvedAt = new Date().toISOString(),
+  expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+  approvalMetadata = metadata,
+  approved = true,
+} = {}) {
+  return {
+    target: "local",
+    artifact: { localTestApproval: true },
+    async verify(_artifact, binding) {
+      return approved ? {
+        ...approvalMetadata,
+        binding: bindingFor(binding),
+        approvedAt,
+        expiresAt,
+      } : null;
+    },
+  };
+}
+
 function memoryStore() {
   const objects = new Map();
   const registry = new Map();
@@ -56,7 +77,7 @@ test("publishes exact sealed bytes and independently loads only the registered r
   const packageOne = syntheticMysteryPackage();
   packageOne.mysteryId = "synthetic-local";
   packageOne.version = "local-v1";
-  const published = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, store);
+  const published = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
   assert.equal(published.ok, true);
   assert.equal(published.status, "published");
 
@@ -64,7 +85,7 @@ test("publishes exact sealed bytes and independently loads only the registered r
   assert.equal(loaded.ok, true);
   assert.equal(loaded.definition.solution.narrative.startsWith("SENTINEL-SOLUTION"), true);
 
-  const retry = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, store);
+  const retry = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
   assert.equal(retry.ok, true);
   assert.equal(retry.status, "already_published");
 });
@@ -74,17 +95,17 @@ test("keeps a second immutable version independently loadable and rejects change
   const packageOne = syntheticMysteryPackage();
   packageOne.mysteryId = "synthetic-local";
   packageOne.version = "local-v1";
-  const first = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, store);
+  const first = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
   assert.equal(first.ok, true);
 
   const packageTwo = { ...packageOne, version: "local-v2" };
-  const second = await publishMysteryDefinition(packageTwo, EIGHT_ROLE_PROTOTYPE_RULES, metadata, store);
+  const second = await publishMysteryDefinition(packageTwo, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
   assert.equal(second.ok, true);
   assert.equal((await loadTrustedPublishedMystery(first.ref, store)).ok, true);
   assert.equal((await loadTrustedPublishedMystery(second.ref, store)).ok, true);
 
   const conflicting = { ...packageOne, title: "Different synthetic title" };
-  const conflict = await publishMysteryDefinition(conflicting, EIGHT_ROLE_PROTOTYPE_RULES, metadata, store);
+  const conflict = await publishMysteryDefinition(conflicting, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
   assert.deepEqual(conflict, { ok: false, code: "REGISTRATION_FAILED" });
   assert.equal((await loadTrustedPublishedMystery(first.ref, store)).ok, true);
 });
@@ -94,7 +115,7 @@ test("fails closed for missing, corrupt, mismatched, unpublished, and legacy ref
   const packageOne = syntheticMysteryPackage();
   packageOne.mysteryId = "synthetic-local";
   packageOne.version = "local-v1";
-  const published = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, store);
+  const published = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
   assert.equal(published.ok, true);
 
   const path = `${published.ref.mysteryId}/${published.ref.version}/${published.ref.digestSha256}.json`;
@@ -166,7 +187,7 @@ test("failed read-back or registration leaves an inaccessible orphan and reports
       return [];
     },
   };
-  const result = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, orphanStore);
+  const result = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), orphanStore);
   assert.deepEqual(result, { ok: false, code: "REGISTRATION_FAILED" });
   assert.equal(objects.size, 1);
   assert.deepEqual(await loadTrustedPublishedMystery({
@@ -183,18 +204,17 @@ test("does not replace conflicting object bytes and requires explicit non-secret
   const packageOne = syntheticMysteryPackage();
   packageOne.mysteryId = "synthetic-local";
   packageOne.version = "local-v1";
-  const result = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, {
-    ...metadata,
-    approvalReference: "contains secret data",
-  }, store);
+  const result = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization({
+    approvalMetadata: { ...metadata, approvalReference: "contains secret data" },
+  }), store);
   assert.deepEqual(result, { ok: false, code: "INVALID_APPROVAL" });
   assert.equal(store.objects.size, 0);
 
-  const valid = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, store);
+  const valid = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
   assert.equal(valid.ok, true);
   const path = `${valid.ref.mysteryId}/${valid.ref.version}/${valid.ref.digestSha256}.json`;
   store.objects.set(path, new Uint8Array([1, 2, 3]));
-  assert.deepEqual(await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, store), {
+  assert.deepEqual(await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store), {
     ok: false,
     code: "OBJECT_CONFLICT",
   });
@@ -205,7 +225,7 @@ test("does not register an object whose independent read-back differs from the s
   packageOne.mysteryId = "synthetic-corrupt";
   packageOne.version = "local-v1";
   let registered = false;
-  const result = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, metadata, {
+  const result = await publishMysteryDefinition(packageOne, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), {
     async upload() {},
     async download() {
       return new Uint8Array([0x7b, 0x7d]);
@@ -217,4 +237,42 @@ test("does not register an object whose independent read-back differs from the s
   });
   assert.deepEqual(result, { ok: false, code: "READBACK_MISMATCH" });
   assert.equal(registered, false);
+});
+
+test("requires a fresh verifier result bound to the exact target, identity, digest and rule set", async () => {
+  const packageOne = syntheticMysteryPackage();
+  packageOne.mysteryId = "synthetic-approval";
+  packageOne.version = "local-v1";
+
+  for (const authorization of [
+    localAuthorization({ approved: false }),
+    localAuthorization({ expiresAt: new Date(Date.now() - 1000).toISOString() }),
+    localAuthorization({ approvedAt: new Date(Date.now() + 60_000).toISOString() }),
+    localAuthorization({
+      bindingFor: (binding) => ({ ...binding, target: "production" }),
+    }),
+    localAuthorization({
+      bindingFor: (binding) => ({ ...binding, digestSha256: "0".repeat(64) }),
+    }),
+    localAuthorization({
+      bindingFor: (binding) => ({ ...binding, ruleSetId: "unsupported-rules" }),
+    }),
+    {
+      target: "local",
+      artifact: {},
+      async verify() {
+        throw new Error("raw provider details and secret");
+      },
+    },
+  ]) {
+    const store = memoryStore();
+    assert.deepEqual(await publishMysteryDefinition(
+      packageOne,
+      EIGHT_ROLE_PROTOTYPE_RULES,
+      authorization,
+      store,
+    ), { ok: false, code: "INVALID_APPROVAL" });
+    assert.equal(store.objects.size, 0);
+    assert.equal(store.registry.size, 0);
+  }
 });
