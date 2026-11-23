@@ -45,13 +45,14 @@ const issueCodes = new Set<string>([
   "NON_CANONICAL_TEXT",
 ] satisfies ContentIssueCode[]);
 
+/** True when the path names an own property, whatever its value. */
 function isPresent(root: unknown, path: readonly PropertyKey[]): boolean {
   let current = root;
   for (const segment of path) {
     if (typeof current !== "object" || current === null || !Object.hasOwn(current, segment)) return false;
     current = (current as Record<PropertyKey, unknown>)[segment];
   }
-  return current !== undefined;
+  return true;
 }
 
 /** Maps Zod issues to value-free issues. Zod's own messages are never forwarded. */

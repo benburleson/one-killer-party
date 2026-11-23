@@ -1,4 +1,4 @@
-import type { ContentIssueCode } from "./issues.ts";
+import { type ContentIssueCode, type ContentIssuePath, safePath } from "./issues.ts";
 
 /**
  * Canonical JSON for mystery packages.
@@ -22,16 +22,19 @@ import type { ContentIssueCode } from "./issues.ts";
 export const MAX_CANONICAL_BYTES = 1_048_576;
 export const MAX_CANONICAL_DEPTH = 16;
 
-/** Carries a code and a path only: never the offending value or a parser message. */
+/**
+ * Carries a code and a sanitized path only: never the offending value, a
+ * parser message or a key that does not look like a field name.
+ */
 export class CanonicalJsonError extends Error {
   readonly code: ContentIssueCode;
-  readonly path: readonly (string | number)[];
+  readonly path: ContentIssuePath;
 
   constructor(code: ContentIssueCode, path: readonly (string | number)[] = []) {
     super(code);
     this.name = "CanonicalJsonError";
     this.code = code;
-    this.path = path;
+    this.path = safePath(path);
   }
 }
 
@@ -52,13 +55,15 @@ function write(value: unknown, path: (string | number)[], out: string[]): void {
     out.push(JSON.stringify(value));
   } else if (Array.isArray(value)) {
     if (path.length >= MAX_CANONICAL_DEPTH) throw new CanonicalJsonError("TOO_DEEP", path);
+    const descriptors = Object.getOwnPropertyDescriptors(value);
     // Rejects sparse arrays and arrays carrying extra properties.
-    if (Reflect.ownKeys(value).length !== value.length + 1) throw new CanonicalJsonError("UNSUPPORTED_VALUE", path);
+    if (Reflect.ownKeys(descriptors).length !== value.length + 1) throw new CanonicalJsonError("UNSUPPORTED_VALUE", path);
     out.push("[");
     for (let index = 0; index < value.length; index += 1) {
-      if (!Object.hasOwn(value, index)) throw new CanonicalJsonError("UNSUPPORTED_VALUE", path);
+      const descriptor = descriptors[index];
+      if (!descriptor || !("value" in descriptor)) throw new CanonicalJsonError("UNSUPPORTED_VALUE", [...path, index]);
       if (index > 0) out.push(",");
-      write(value[index], [...path, index], out);
+      write(descriptor.value, [...path, index], out);
     }
     out.push("]");
   } else if (typeof value === "object") {

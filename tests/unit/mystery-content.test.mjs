@@ -211,6 +211,9 @@ test("IDs are unique per namespace and every reference resolves", () => {
   rejected((p) => { p.objectives[0].targetCharacterId = "role-9"; }, "objectives[0].targetCharacterId: UNRESOLVED_REFERENCE");
   rejected((p) => { p.objectives[0].targetCharacterId = "role-1"; }, "objectives[0].targetCharacterId: SELF_REFERENCE");
   rejected((p) => { p.objectives[0].type = "INVESTIGATIVE"; }, "objectives[0].type: UNKNOWN_FIELD");
+  // Validation success must imply the package can be encoded: an explicit `undefined` is not "absent".
+  rejected((p) => { p.objectives[1].targetCharacterId = undefined; }, "objectives[1].targetCharacterId: INVALID_TYPE");
+  rejected((p) => { p.title = undefined; }, "title: INVALID_TYPE");
 
   rejected((p) => { p.solution.motiveId = "motive-z"; }, "solution.motiveId: UNRESOLVED_REFERENCE");
   rejected((p) => { p.solution.methodId = "motive-a"; }, "solution.methodId: UNRESOLVED_REFERENCE");
@@ -303,7 +306,7 @@ test("canonical encoding rejects values without a stable JSON form", () => {
   const cases = [
     ["UNSUPPORTED_NUMBER", [1.5, NaN, Infinity, -Infinity, -0, 2 ** 53, 1e21]],
     ["UNSUPPORTED_VALUE", [undefined, 1n, Symbol("s"), () => 1, new Date(0), new Map(), new Set(), /x/, new (class Box {})(),
-      new Uint8Array(1), sparse, tagged, { get a() { return 1; } }, Object.defineProperty({}, "a", { value: 1 }),
+      new Uint8Array(1), sparse, tagged, Object.defineProperty([1], 0, { get: () => 1, enumerable: true }), { get a() { return 1; } }, Object.defineProperty({}, "a", { value: 1 }),
       { toJSON() { return 1; } }]],
     ["NON_CANONICAL_TEXT", ["e\u0301", "\ud800", "x\udc00y"]],
     ["UNSAFE_KEY", [{ "e\u0301": 1 }, { "\ud800": 1 }, { [Symbol("s")]: 1 }, JSON.parse('{"__proto__":1}')]],
@@ -316,6 +319,13 @@ test("canonical encoding rejects values without a stable JSON form", () => {
     }
   }
   assert.equal(canonicalCode(() => canonicalJsonBytes("x".repeat(MAX_CANONICAL_BYTES))), "PACKAGE_TOO_LARGE");
+  // A thrown error names well-formed field paths only, never an arbitrary authored key.
+  for (const [value, path] of [[{ items: [{ order: 1.5 }] }, ["items", 0, "order"]], [{ "an authored sentence": { a: 1.5 } }, []]]) {
+    assert.throws(() => canonicalJsonBytes(value), (error) => {
+      assert.deepEqual([error.code, error.path], ["UNSUPPORTED_NUMBER", path]);
+      return true;
+    });
+  }
   assert.equal(canonicalCode(() => canonicalJsonBytes(JSON.parse("[".repeat(16) + "]".repeat(16)))), "(ok)");
   assert.equal(canonicalCode(() => canonicalJsonBytes(Object.assign(Object.create(null), { a: 1 }))), "(ok)");
 });
@@ -382,7 +392,7 @@ test("a sealed package loads only against its exact pinned reference", () => {
     assert.deepEqual(load(bytes, withRef({ digestSha256: digest })), ["digestSha256: INVALID_TYPE"]);
   }
   assert.deepEqual(load(bytes, withRef({ digestSha256: "0".repeat(64) })), ["(package): DIGEST_MISMATCH"]);
-  assert.deepEqual(load(bytes, undefined), ["(package): REQUIRED"]);
+  assert.deepEqual(load(bytes, undefined), ["(package): INVALID_TYPE"]);
   assert.deepEqual(load(bytes, ref.digestSha256), ["(package): INVALID_TYPE"]);
   assert.deepEqual(load(bytes, withRef({ publishedAt: "now" })), ["publishedAt: UNKNOWN_FIELD"]);
   assert.deepEqual(load(bytes, withRef({ version: "LATEST" })), ["version: INVALID_VERSION"]);

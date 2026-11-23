@@ -123,7 +123,8 @@ const characterObjective = z.strictObject({
   characterId: id,
   releasePhase,
   description: longText,
-  targetCharacterId: id.optional(),
+  // Absent or a valid ID; an explicit `undefined` has no JSON form and is rejected.
+  targetCharacterId: id.exactOptional(),
 });
 
 const solution = z.strictObject({
