@@ -78,11 +78,11 @@ Actual routing, component naming and whether host/guest share the same session s
 
 ### Flow P1: Join and receive role
 
-1. Guest taps invitation link or enters a six-character party code (code format is a baseline proposal).
+1. Guest taps invitation link or enters the confirmed **eight-character** reusable invitation code (D-024).
 2. App requests a display name; guest does not need conventional account registration.
 3. Guest receives an independent authenticated identity/session. An invite code by itself grants **party entry**, not permission to view a specific participant's secrets.
 4. App confirms membership and displays waiting-lobby instructions.
-5. When host assigns a character, guest sees **their own** public intro plus permitted private biography/relationships. Pre-party viewing cutoff is OPEN; the app must follow explicit content release rules.
+5. When host assigns a character, guest sees **their own** public intro and an **approved spoiler-safe starting private dossier** during LOBBY; role-only future knowledge remains gated. Under D-028 even the murderer does **not** see guilt, method, real chronology or cover story until the host starts ACT_1. Current placeholder parties have no private dossiers; this applies once a published private package is deployed.
 6. Guest is offered concise instructions: in-person play, lie/bluff allowed, official clues immutable, objectives optional, respect each other's devices.
 7. Guest may view costume suggestions or opening conversation prompts if authored.
 
@@ -110,11 +110,11 @@ Actual routing, component naming and whether host/guest share the same session s
 
 ## 5. Murderer journey — additional considerations
 
-- A guest who is assigned Theodore receives an unmistakable **private** murderer notice, exact method/motive/timeline and suggested cover story at the authorized point.
+- When the host starts ACT_1, the correctly assigned murderer receives an unmistakable **private** murderer notice, motive, method, real chronology and suggested cover story. Before ACT_1 the participant sees only an approved **nonrevealing** starting dossier.
 - The murderer gets ordinary app navigation and public clues as any other guest.
 - The murderer may lie in conversation; their private “remember hiding the statuette” is **personal knowledge**, not independently verified official evidence.
 - Host **assigns Theodore via public profile** but should not be told Theodore is the murderer. The host may become the murderer if self-assigned; that is permitted as normal character access.
-- **OPEN:** Whether murderer knowledge is available immediately upon role assignment or only at game start; current story text implies it is provided before play, but exact pre-party gating is not specified.
+- **CONFIRMED D-028 (2026-11-22):** Murderer knowledge is released at the authorized ACT_1 start, never on role assignment or in the LOBBY dossier. Editorial review must revise/gate any existing draft dossier details that would reveal guilt before then; no text is silently rewritten in this architecture PR.
 
 ## 6. Error and edge-case behavior
 
