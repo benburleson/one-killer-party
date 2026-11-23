@@ -15,8 +15,8 @@ async function sameOrigin() {
   return origin !== null && origin === authConfig().origin;
 }
 
-export type FormState = { message?: string; result?: IssueResult; link?: string };
-export type LobbyActionState = { message?: string; token?: string };
+export type FormState = { message?: string; result?: IssueResult; link?: string; issuedVersion?: number };
+export type LobbyActionState = { message?: string; token?: string; updated?: boolean; conflict?: boolean };
 
 export async function signIn(_state: FormState, form: FormData): Promise<FormState> {
   const neutralResponse = { message: "If sign-in is available, check your email for a link." };
@@ -96,7 +96,7 @@ export async function rotateInvite(_state: FormState, form: FormData): Promise<F
       ? Number(rawVersion) : NaN;
     const result = await service().rotate(form.get("partyId"), version);
     if (result.kind === "issued") {
-      return { result, link: `${authConfig().origin}/join#code=${result.code}` };
+      return { result, link: `${authConfig().origin}/join#code=${result.code}`, issuedVersion: version + 1 };
     }
   } catch {
     // Never return database or provider errors.
@@ -166,10 +166,10 @@ export async function assignCharacter(_state: LobbyActionState, form: FormData):
       // Refresh canonical roster only after successful assignment.
       // A stale-version rejection must keep its local error message visible.
       revalidatePath(`/host/${partyId}`);
-      return { message: "Character assignment updated." };
+      return { message: "Character assignment updated.", updated: true };
     }
     if (outcome === "conflict") {
-      return { message: "The party changed since this roster loaded. Refresh and retry." };
+      return { message: "The party changed since this roster loaded. Refresh and retry.", conflict: true };
     }
     if (outcome === "occupied") {
       return { message: "That character is already assigned. Refresh and choose an available role." };

@@ -99,6 +99,42 @@ to that credential permits impersonation and must be restricted accordingly.
 
 Production migrations have been applied, but O-025's backup/restore, retention and isolation decisions are not fully settled. O-026 (private mystery storage) and O-027 (public story/repository policy) remain open. Do not infer that PR previews are connected to a safe dedicated Supabase project.
 
+## Lobby synchronization
+
+M1.7 uses authenticated, same-origin polling rather than Supabase Realtime.
+No channel, publication, browser table grant, migration, or new deployment
+configuration is required. Every host poll verifies the current host and
+party through the existing service-only roster RPCs and returns only the party
+version. A changed version triggers a fresh server-rendered, authorized roster
+read; the poll response is not a roster or a source of authority. Every guest
+poll verifies the current session and returns only that principal's existing
+guest membership projection and public assignment, never the host roster or
+credentials. Responses are private and non-cacheable. Knowing a party ID or
+invitation code does not grant host access.
+
+Visible, online lobbies poll at five-second intervals, with one active request,
+a ten-second timeout, and exponential error backoff capped at thirty seconds.
+Polling stops on unmount or lost authorization and pauses while hidden or
+offline. Returning online or to the foreground immediately reconciles against
+the server; failures show a non-blocking reconnect indicator. Consequently
+updates are normally visible within one interval, not instantaneously, and an
+offline browser may temporarily display its last public card until it
+reconciles. Removal or recovery prevents subsequent authorized reads by the
+old principal; polling does not revoke an already issued authentication JWT.
+No credentials are replaced automatically. Polling load scales with the number
+of visible lobby tabs; monitor service capacity before wider rollout.
+
+Assignment drafts retain the version on which editing began. If another
+device changes the party, the host must review the refreshed roster before
+reapplying the preserved selection; optimistic database checks still reject
+races that happen before the refresh. No automatic retry overwrites another
+host's change. Since the version does not identify which operation changed
+the party, a displayed rotated invitation is hidden conservatively after any
+later version change: it may have been replaced, even if the change was only
+an admission or assignment. The host can issue a fresh code if needed.
+This does not resolve O-025–O-027 or add post-lobby gameplay, private dossiers,
+or clue delivery.
+
 ## Invitation lifecycle
 
 A cryptographically random eight-character code uses a 32-character alphabet

@@ -19,7 +19,7 @@ export default defineConfig({
     ? [["list"]]
     : [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]],
   workers: integration ? 1 : undefined,
-  timeout: integration ? 90_000 : 30_000,
+  timeout: integration ? 150_000 : 30_000,
   use: {
     baseURL: "http://127.0.0.1:3000",
     browserName: "chromium",

@@ -31,4 +31,4 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-export const config = { matcher: ["/host/:path*", "/auth/callback", "/join"] };
+export const config = { matcher: ["/host/:path*", "/auth/callback", "/join", "/join/sync"] };

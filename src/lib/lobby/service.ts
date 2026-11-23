@@ -1,9 +1,9 @@
 import "server-only";
 import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, isAuthApiError, isAuthSessionMissingError } from "@supabase/supabase-js";
 import { authClient, currentUserId } from "@/lib/host/auth";
-import { validPartyId, verifier } from "@/lib/host/core";
+import { validPartyId, verifiedEmailHost, verifier } from "@/lib/host/core";
 import { generateRecoveryToken, recoveryTokenVerifier } from "./core";
 import {
   BLACKWOOD_PUBLIC_CHARACTERS,
@@ -70,6 +70,18 @@ export async function signedInUser() {
   const { data, error } = await client.auth.getUser();
   if (error || !data.user || !validPartyId(data.user.id)) return null;
   return { id: data.user.id, isAnonymous: data.user.is_anonymous === true };
+}
+
+export async function syncUser() {
+  const client = await authClient(true);
+  const { data, error } = await client.auth.getUser();
+  if (error) {
+    if (isAuthSessionMissingError(error) ||
+        (isAuthApiError(error) && (error.status === 401 || error.status === 403))) return null;
+    throw new Error("Authentication unavailable");
+  }
+  if (!data.user || !validPartyId(data.user.id)) return null;
+  return { id: data.user.id, isHost: verifiedEmailHost(data.user) !== null };
 }
 
 export function rateBucketHash(scope: string, principal: string, forwardedFor: string | null) {
