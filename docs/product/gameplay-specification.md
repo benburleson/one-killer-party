@@ -95,7 +95,7 @@ Represent phase changes as an explicit **server-authoritative state machine**; c
 Every character's authoring packet contains:
 
 - Public identity: name, archetype, background and potentially costume direction.
-- Private background: hidden motives, events, relationships, personal knowledge and (for murderer only) truth and cover story.
+- **Pre-start private background:** only approved nonspoiler biography, relationships and preparation prompts for the assigned role; **no guilt or murderer crime truth in LOBBY**. The murderer-only truth, method and cover story belong to a separately gated ACT_1 briefing (D-028).
 - Character relationships: the people to seek out or avoid, reasons and conflicts.
 - Objectives: small, legible conversation catalysts refreshed by act.
 - Clues and recollections released by act; no preloading of later content.
@@ -117,7 +117,7 @@ Objectives are **optional**; no requirement for players to tap Complete, scan co
 
 ### Murderer-specific play
 
-- **CONFIRMED:** Murderer is informed they are guilty and is given motive, real chronology and cover story.
+- **CONFIRMED D-028:** Murderer is informed of guilt, motive, method, real chronology and cover story **only when the host starts ACT_1**; the LOBBY dossier for that same character does not reveal guilt or contain indirect spoilers. The briefing is private to the assigned player (including a host only when explicitly enrolled as that player).
 - May knowingly lie about actions, location, intentions or impressions; may use existing information to sow doubt.
 - May **not** alter official evidence, forge app output or change authoritatively defined events.
 - May submit an ordinary accusation as camouflage; whether they are ranked as a detective is proposed **no**.
