@@ -1,13 +1,10 @@
 # Lobby persistence and host commands
 
-M1.3–M1.7 implementation and schema are version-controlled in `supabase/`.
-M1.5 guest and M1.6 role-assignment code is merged; M1.7 polling uses the
-existing RPCs and adds no migration. The M1.5/M1.6 **remote migration,
-production deployment, and smoke-test states are unknown** until the owner
-verifies them. Earlier M1.3/M1.4 production migration history is
-owner-reported. See [production operations](../production-operations.md) for
-the dated rollout table and human-approved deployment procedure. All
-**automated tests** use disposable local Supabase only.
+The lobby schema and its service-role commands are version-controlled in
+`supabase/`. Production migration, deployment and smoke-test status, including
+which results are owner attestation, is recorded only in
+[production operations](../production-operations.md). All **automated tests**
+use disposable local Supabase only.
 
 For the **accepted design boundary** between lobby state and future private content, see
 [mystery content architecture](mystery-content-architecture.md): private immutable object packages, restricted Postgres registry and party/release state, with server-only authorized projections. Decisions D-026–D-028 do not change the current lobby or authorize private publication.
@@ -28,7 +25,7 @@ The migrations in `supabase/migrations/` create:
 - `party_character_refs`: only a party ID and public character ID, with no
   authored names, dossiers, or story data. The participant composite foreign
   key prevents assigning a reference that is not registered for that party.
-  M1.6 registers exactly eight public Blackwood IDs for
+  Party creation registers exactly eight public Blackwood IDs for
   `blackwood-affair` / `first-playtest-placeholder-v1`; this remains a
   placeholder package pin, not a claim that a complete mystery package is
   published.
@@ -56,8 +53,12 @@ only for `blackwood-affair`.
 
 ## Browser access and server boundary
 
-RLS is enabled on all eight tables. No policies and no table privileges are
-granted to `anon` or `authenticated`; therefore visitors, unjoined users,
+RLS is enabled on all eight tables. No policies exist, and `anon` and
+`authenticated` hold no privilege on any `public` table or sequence; default
+privileges keep later tables and sequences the same way.
+`supabase/tests/security_invariants.test.sql` checks this across the whole
+schema, so a new table or RPC that skips RLS, grants or a pinned search path
+fails the suite. Therefore therefore visitors, unjoined users,
 participants, and hosts cannot directly read or mutate these tables. This is
 deliberate: even a host cannot directly read the roster or invitation verifier.
 The API also disables automatic exposure of newly created tables.
@@ -74,25 +75,26 @@ RPC responses contain only explicitly selected party fields, not invitation
 verifiers or private story data. The service-role boundary is trusted: access
 to that credential permits impersonation and must be restricted accordingly.
 
-- **M1.4:** host authority does not imply participant or author/solution
+- **Host commands:** host authority does not imply participant or author/solution
   authority. The pinned `blackwood-affair` / `first-playtest-placeholder-v1`
   identifiers are nonsecret placeholders, not validated story content.
-- **M1.5:** `join_party` validates the active stored invite verifier, status,
+- **Guest membership:** `join_party` validates the active stored invite verifier, status,
   expiry, same-principal idempotency, removal tombstones and Blackwood capacity
-  under a per-party row lock. `get_guest_membership` returns only the caller's
+  under a per-party row lock, and returns the party's pinned mystery ID and
+  version on success. `get_guest_membership` returns only the caller's
   safe lobby membership. `list_host_participants` returns the host-safe roster;
   host enrollment, removal, recovery issuance and redemption are separate
-  commands. Invitation rotation remains compatible with M1.4.
-- **M1.6:** `src/lib/lobby/public-characters.ts` is an immutable server-only
+  commands.
+- **Public characters:** `src/lib/lobby/public-characters.ts` is an immutable server-only
   projection copied only from Blackwood public cast §2. It contains only the
   eight playable IDs, public names, archetypes and descriptions; do not import
   or parse `blackwood-affair.md` at runtime. The catalog explicitly accepts
   only the existing `blackwood-affair` /
   `first-playtest-placeholder-v1` pin. No dossier, culprit marker, solution,
   motive, method or future content is stored or returned.
-- The M1.6 migration backfills the eight IDs for existing parties with that
-  exact pin, and registers them transactionally when the existing host-party
-  creation RPC creates a new party. It does not write story fields.
+- Existing parties with that exact pin were backfilled with the eight IDs;
+  the party-creation RPC registers them transactionally for new parties. No
+  story fields are written.
   `assign_public_character` locks the party row, checks the host, `LOBBY`,
   package pin, participant membership, registered public ID, uniqueness and
   expected party version. An identical request at the current version is an
@@ -104,18 +106,28 @@ to that credential permits impersonation and must be restricted accordingly.
   and party version. Guest reads return only the authenticated caller's own
   public assignment. The server validates the package pin before projecting
   catalog labels; service-role RPCs remain inaccessible to browser roles.
-  Role assignment is `LOBBY`-only. This migration adds no game-start state,
-  dossier access, clue release or solution data.
+  Role assignment is `LOBBY`-only. There is no game-start state, dossier
+  access, clue release or solution data.
 
-O-025's backup/restore, retention and preview isolation decisions are not fully
-settled. D-026–D-028 settle future private storage, preserved content versions and ACT_1 murderer briefing timing; O-033 leaves **existing public spoiler history** remediation open. Do not infer that PR previews are connected to a safe
-dedicated Supabase project or that merged migrations are applied remotely.
+**Seams for private content (not implemented).** The server reads the pin
+from the database on every projection (`get_host_party`,
+`get_guest_membership`, `join_party`) and validates it in
+`public-characters.ts`; `src/lib/supabase/service-client.ts` is the single
+service-role entry point. Still hard-coded to the placeholder:
+`create_host_party` (the pin it writes), `assign_public_character` (the eight
+IDs and the pin check) and the Blackwood capacity of eight. Those change with
+the published-version registry, not before.
+
+O-025's backup/restore, retention and preview isolation decisions are not
+settled. D-026–D-028 settle future private storage, preserved content versions
+and ACT_1 murderer briefing timing; O-033 leaves **existing public spoiler
+history** remediation open. Do not infer that PR previews are connected to a
+safe dedicated Supabase project.
 
 ## Lobby synchronization
 
-M1.7 uses authenticated, same-origin polling rather than Supabase Realtime.
-No channel, publication, browser table grant, migration, or new deployment
-configuration is required. Every host poll verifies the current host and
+The lobby uses authenticated, same-origin polling rather than Supabase
+Realtime. There is no channel, publication or browser table grant. Every host poll verifies the current host and
 party through the existing service-only roster RPCs and returns only the party
 version. A changed version triggers a fresh server-rendered, authorized roster
 read; the poll response is not a roster or a source of authority. Every guest
@@ -154,7 +166,7 @@ without ambiguous characters (40 bits of entropy); only its 32-byte SHA-256
 verifier is stored. The host must save or share the code when it is
 displayed: a hash cannot be reversed to redisplay it. On returning to a lobby,
 the host can explicitly regenerate the code; the old code is revoked in the
-same transaction as the replacement. The command checks the party version
+same transaction as the replacement. Rotation checks the party version
 shown when rotation was confirmed, so a stale concurrent request cannot
 silently replace a newer code. Regeneration affects everyone holding the
 previous link or code.
@@ -301,7 +313,7 @@ Reviewers should confirm:
 - [ ] Migrations and tests run only against a fresh local disposable database.
 - [ ] RLS remains enabled and no browser role has table privileges or policies.
 - [ ] Participant/party/character constraints protect uniqueness and scope.
-- [ ] M1.6's public catalog contains exactly the eight §2 playable IDs and no
+- [ ] The public catalog contains exactly the eight §2 playable IDs and no
   private fields; party references are backfilled and new parties register
   that same pinned roster.
 - [ ] Assignment RPC locks and checks the host, party, participant, role,

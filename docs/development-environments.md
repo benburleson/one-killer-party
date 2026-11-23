@@ -37,4 +37,3 @@ It must not receive production database credentials.
 
 Copilot's hosted agent is **not** the Codespace dev container. [`copilot-setup-steps.yml`](../.github/workflows/copilot-setup-steps.yml) prepares its separate runtime; CI independently verifies the resulting PR. Vercel PR previews are likewise separate deployments and must not silently inherit production database/service-role credentials. Human review remains mandatory for production-sensitive changes.
 
-Historical trial evidence and manual interventions are retained in [agent evaluation](agent-evaluation.md), rather than copied into an evergreen environment guide.

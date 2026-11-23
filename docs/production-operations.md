@@ -13,24 +13,23 @@
 
 The root/`www` marketing hosts must send **Host a party** visitors to `APP_URL + /host`. A browser tab left on `www.onekillerparty.com/host` will fail the app's intentional exact Origin check; start from the app subdomain. Do not weaken Origin validation to accommodate marketing-host posts.
 
-## M1.5–M1.7 rollout status (checked 2026-11-23)
+## Production status
 
-These are separate gates; a merged PR, successful CI run, or Vercel PR check
-does not establish the next one.
+Code merged, migration applied, Vercel Production deployed and production
+smoke-tested are separate gates. A merged PR, a green CI run or a Vercel PR
+check establishes none of the later ones.
 
-| Milestone | Code merged | Production migration applied | Vercel Production deployed | Production smoke-tested |
-| --- | --- | --- | --- | --- |
-| M1.5 guest join/recovery | Yes; present in current main | **Unknown — owner verification required** (`20261122000000_guest_membership.sql`) | **Unknown — owner verification required** | **Unknown — owner verification required** |
-| M1.6 public role assignment | Yes; [PR #34](https://github.com/benburleson/one-killer-party/pull/34) merged 2026-11-22 | **Unknown — owner verification required** (`20261122010000_public_character_assignment.sql`) | **Unknown — owner verification required** | **Unknown — owner verification required** |
-| M1.7 lobby synchronization | Yes; [PR #36](https://github.com/benburleson/one-killer-party/pull/36) merged 2026-11-23 | **Not applicable**; polling uses existing RPCs | **Unknown — owner verification required** | **Unknown — owner verification required** |
+| Item | Status | Basis |
+| --- | --- | --- |
+| `20261121030000_lobby_persistence.sql`, `20261121040000_host_party_commands.sql` | Applied | Owner attestation; the owner also reported both versions in the remote migration history |
+| `20261122000000_guest_membership.sql`, `20261122010000_public_character_assignment.sql` | Applied | Owner attestation (issue #41, 2026-11-23) |
+| Guest join and recovery, public role assignment, lobby synchronization | Deployed and smoke-tested in Production | Owner attestation (issue #41, 2026-11-23) |
+| `20261123000000_browser_role_lockdown_and_join_pin.sql` | **Not applied** | Needs the approval procedure below; apply before deploying the app version that depends on it |
 
-CI run [#90](https://github.com/benburleson/one-killer-party/actions/runs/45087065308)
-passed on the merged M1.7 `main` SHA. PR #36 also had a completed Vercel check,
-but that check does not verify the production target or a production smoke
-test. The earlier M1.3/M1.4 remote migration history is owner-reported in the
-repository; it does not establish M1.5/M1.6 rollout. Update this table only
-with a verified target, migration history, production deployment, and actual
-smoke-test evidence.
+**Owner attestation is not independent verification.** This repository holds
+no migration-history output, deployment SHA, date or smoke-test record for the
+attested rows, and no agent inspected the Supabase or Vercel dashboards. Add
+those links here if they are captured; do not infer them.
 
 ## Vercel Production environment
 
@@ -50,15 +49,15 @@ After editing deployment environment variables, redeploy Production. Ensure the 
 - **Guest auth preflight:** guest identity creation requires Supabase
   **Authentication → Providers → Anonymous Sign-Ins** enabled for the intended
   production project. The local disposable project enables it in
-  `supabase/config.toml`. The owner reported a prior production episode where
-  this setting was disabled and guest join misleadingly reported an
-  existing-account conflict. The current production setting is **unknown**:
-  verify it directly before any guest-join rollout and have the owner approve
-  any change. Do not enable it in previews unless they use an isolated,
+  `supabase/config.toml`. If it is disabled, guest join fails with the
+  "Guest sign-in was unavailable" message. The owner's production smoke test
+  covered guest join; the setting itself was not inspected from this
+  repository, so check it first if guest join fails. The owner approves any
+  change. Do not enable it in previews unless they use an isolated,
   disposable Supabase project.
 - **Delivery:** The owner reports custom SMTP configured in Supabase, following the Resend setup for One Killer Party. Intended dedicated sending domain: `auth.onekillerparty.com` with sender `no-reply@auth.onekillerparty.com`; **verify actual sender/domain and provider settings in the Supabase and mail-provider dashboards before relying on them**. SMTP host, username, password/API key, DNS ownership records, verified sender, and sending limits are managed in the providers' dashboards, **not in GitHub or Vercel client variables**.
 - **DNS:** Keep sender-domain SPF/DKIM records as instructed by the email provider; avoid changing inbound MX records for the apex domain unless explicitly required. Check sender-domain verification, bounce/delivery diagnostics and provider sending limits.
-- **Public host signup:** Custom SMTP enables email delivery beyond Supabase organization members, but does **not** implement guest party admission or recovery. Monitor abuse, throttling, CAPTCHA and delivery reliability before public promotion. Do not claim successful non-team-member delivery until it has been tested.
+- **Public host signup:** Custom SMTP enables email delivery beyond Supabase organization members, Monitor abuse, throttling, CAPTCHA and delivery reliability before public promotion. Do not claim successful non-team-member delivery until it has been tested.
 
 ### Safe host smoke test
 
@@ -66,38 +65,30 @@ After editing deployment environment variables, redeploy Production. Ensure the 
 2. Follow the email link back to the exact app host; verify the signed-in dashboard.
 3. Create one disposable test Blackwood party; save the initially displayed invite code privately (it cannot be recovered from its database hash).
 4. Open and refresh the lobby; verify the host-only view, invitation rotation (old code invalidated), and sign-out protection. Do not publish real invite links or tokens.
-5. Later verify delivery to a **non-organization** address after SMTP is configured, without exposing its address in logs/artifacts.
+5. Verify delivery to a **non-organization** address without exposing its address in logs/artifacts.
 
 Troubleshooting: Vercel server log events tagged `host_magic_link` contain safe stage categories (`origin_rejected`, `invalid_email_format`, `provider_rejected`, `provider_accepted`, `unexpected_server_error`). `provider_accepted` means the Supabase API accepted the request, **not** that email was delivered. Use Supabase Auth and SMTP provider logs for downstream delivery. Origin checks compare the request `Origin` exactly with `APP_URL`; request `Referer` is not a substitute. Never log raw headers, user emails, magic links or service keys.
 
 ## Database migrations and separation
 
-Migrations are committed under `supabase/migrations/` and reviewed alongside their related PR. The owner confirmed `20261121030000_lobby_persistence.sql` and `20261121040000_host_party_commands.sql` were applied to the linked production Supabase project, and both versions appeared in the remote migration history.
+Migrations are committed under `supabase/migrations/` and reviewed alongside
+their PR. Their production status is in the table above. All migration and
+integration tests use the disposable local Supabase project; do not link or
+reset the production database.
 
-`20261122010000_public_character_assignment.sql` is the M1.6 production
-migration, merged with [PR #34](https://github.com/benburleson/one-killer-party/pull/34).
-Its application to Production is **unknown**; merging did not authorize it.
-It backfills only the eight public role IDs for parties pinned to
-`blackwood-affair` / `first-playtest-placeholder-v1`, updates the existing
-party-creation RPC to register those IDs for newly created parties, and adds
-the assignment and safe-read RPC projections. It does not add story content.
-All migration and integration tests must use the disposable local Supabase
-project; do not link or reset the production database.
+`20261123000000_browser_role_lockdown_and_join_pin.sql` revokes every
+remaining browser-role privilege on `public` tables and sequences (the
+recovery-audit sequence previously allowed `setval`), stops future tables and
+sequences from inheriting browser grants, and makes `join_party` return the
+party's pinned mystery ID and version. **Apply it before deploying the
+matching app version:** the new server rejects a join whose RPC response lacks
+the pin, while the previous app version keeps working against the migrated
+database. The default-privilege change applies to objects created by the role
+that runs the migration; confirm the result on the target with the catalog
+queries in `supabase/tests/security_invariants.test.sql` rather than assuming
+the local default ACLs match Production.
 
-`20261123000000_browser_role_lockdown_and_join_pin.sql` is **not applied to
-Production**; merging does not authorize it. It revokes every remaining
-browser-role privilege on `public` tables and sequences (the recovery-audit
-sequence previously allowed `setval`), stops future tables and sequences from
-inheriting browser grants, and makes `join_party` return the party's pinned
-mystery ID and version. **Apply it before deploying the matching app
-version:** the new server rejects a join whose RPC response lacks the pin,
-while the previous app version keeps working against the migrated database.
-The default-privilege change applies to objects created by the role that runs
-the migration; confirm the result on the target with the catalog queries in
-`supabase/tests/security_invariants.test.sql` rather than assuming the local
-default ACLs match Production.
-
-For M1.5/M1.6 and other future production changes:
+For every production change:
 
 1. Explicitly verify the linked **target project and environment**; inspect the target database and existing migration history. Plan backup/restore and rollback for destructive or data-changing operations.
 2. Review migration SQL, especially every introduced or modified RPC; compare the verified target with `npx supabase migration list --remote` and `npx supabase db push --dry-run --remote`.
@@ -108,17 +99,15 @@ For M1.5/M1.6 and other future production changes:
 
 ## Current limits and unfinished work
 
-The merged app supports M1.5 guest joining, removal and host-assisted recovery;
-M1.6 public assignments; and M1.7 spoiler-safe polling/reconciliation. Their
-production migration/deployment/smoke status is recorded separately above.
-M1.7 uses authenticated polling, not Supabase Realtime, and adds no migration.
-Private dossiers and game progression are not implemented. Supabase sessions
-from a recovered guest's lost browser cannot be globally revoked by this app
-because the supported admin sign-out call requires that session's JWT;
-rebinding and tombstoning remove that old principal's access to the recovered
-participant, but its access token may remain authenticated until expiry.
+The app is `LOBBY`-only: private dossiers and game progression are not
+implemented. Lobby updates use authenticated polling, not Supabase Realtime.
+Supabase sessions from a recovered guest's lost browser cannot be globally
+revoked by this app because the supported admin sign-out call requires that
+session's JWT; rebinding and tombstoning remove that old principal's access
+to the recovered participant, but its access token may remain authenticated
+until expiry.
 
-Production backups/restore rehearsal, retention, dedicated preview Supabase isolation, SMTP deliverability beyond owner test addresses, and anonymous-signup abuse monitoring still require verification/decisions (O-025, O-029). The database-backed rate limiter is distributed across app instances, but its principal fallback and forwarded-address proxy assumptions require monitoring before public promotion. This runbook records configuration and owner-reported results, not independent credentials inspection or permission for future production changes.
+Production backups/restore rehearsal, retention, dedicated preview Supabase isolation, SMTP deliverability beyond owner test addresses, and anonymous-signup abuse monitoring still require verification/decisions (O-025, O-029). The database-backed rate limiter is distributed across app instances, but its principal fallback and forwarded-address proxy assumptions require monitoring before public promotion. This runbook records configuration and owner-attested results, not independent credentials inspection or permission for future production changes.
 
 ## Cloudflare Turnstile for Supabase Auth
 

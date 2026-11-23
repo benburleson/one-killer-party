@@ -91,7 +91,7 @@ Owner-approved `D-026`–`D-028` resolve **O-026**, the future-source visibility
 
 ### Established infrastructure facts
 
-App authentication is served from `https://app.onekillerparty.com`; the owner confirmed a successful host magic-link sign-in after correcting a stale browser-tab origin. The production Supabase project has M1.3/M1.4 migrations applied and custom SMTP configured (owner-reported). GitHub CI/workflows and PR protections are version-controlled and documented. Operational details live in [production operations](../production-operations.md) rather than unresolved O-007/O-008 setup questions.
+App authentication is served from `https://app.onekillerparty.com`; the owner confirmed a successful host magic-link sign-in after correcting a stale browser-tab origin. The production Supabase project has the lobby migrations through public character assignment applied, the lobby features smoke-tested, and custom SMTP configured (all owner-attested, not independently verified). GitHub CI/workflows and PR protections are version-controlled and documented. Operational details live in [production operations](../production-operations.md) rather than unresolved O-007/O-008 setup questions.
 
 ### Blockers for full mystery and state engine
 
@@ -171,6 +171,8 @@ App authentication is served from `https://app.onekillerparty.com`; the owner co
 7. **After a playtest**, record observations separately from decisions; only change canonical content through reviewed versioned changes.
 
 ## 8. Suggested first issues (not code authorization)
+
+The priority 0 and first two priority 1 rows (environment check, auth/recovery ADR, party creation and lobby, public character assignment) are delivered. The rest are open.
 
 | Priority | Issue scope | Dependencies and definition of done |
 |---|---|---|

@@ -37,7 +37,23 @@ Report denominators and failed trials; do not calculate success percentages from
 
 Advance from human-created issues to automated issue creation only after the agent can complete several scoped tasks with credible tests and evidence. Advance from human agent-dispatch to automatic dispatch only for pre-approved, low-risk issue categories with deduplication, rollback/stop mechanisms, and explicit limits on execution cost and privileges. **Never graduate to automatic merge as part of this experiment.**
 
-## Trial 1 — Issue #2: Playwright landing-page smoke test (2026-11-20)
+## Archive: dated trial and incident records
+
+Everything below is history, kept for the public showcase. It records what
+was observed on the stated dates and is **not current guidance**; where a
+later entry corrects an earlier one, the later entry says so. Current
+procedures are in [workflow setup](workflow-setup.md) and
+[production operations](production-operations.md).
+
+### Baseline and approval policy (2026-11-20)
+
+- The owner reported that the `main` ruleset is configured.
+- During trial 1 GitHub asked the owner to approve an agent-originated
+  workflow run; the owner then disabled Copilot's **Require approval for
+  workflow runs** setting. Vercel's preview deployment succeeded and the owner
+  opened its URL.
+
+### Trial 1 — Issue #2: Playwright landing-page smoke test (2026-11-20)
 
 **Evidence:** [Issue #2](https://github.com/benburleson/one-killer-party/issues/2) · [Copilot PR #3](https://github.com/benburleson/one-killer-party/pull/3) · [CI run #6](https://github.com/benburleson/one-killer-party/actions/runs/44832837014)
 
@@ -59,14 +75,14 @@ Advance from human-created issues to automated issue creation only after the age
 
 **Trial 2 hypothesis:** A fresh agent issue that changes CI should result in tests and screenshot artifacts without an intermediate **Approve and run workflows** prompt. Record whether that actually happens; do not infer it from settings alone.
 
-## Repeated autonomy handoff failure — PRs #12 and #14 (2026-11-21)
+### Repeated autonomy handoff failure — PRs #12 and #14 (2026-11-21)
 
 - [PR #12](https://github.com/benburleson/one-killer-party/pull/12): [CI run 44841426299](https://github.com/benburleson/one-killer-party/actions/runs/44841426299) passed, but [promotion run 44841556142](https://github.com/benburleson/one-killer-party/actions/runs/44841556142) skipped the then-WIP title. The later title edit did not recheck. A human-triggered second CI attempt was recorded; its [promotion run 44843152918](https://github.com/benburleson/one-killer-party/actions/runs/44843152918) failed with `Resource not accessible by integration` at the ready mutation. The PR was ultimately merged by a human.
 - [PR #14](https://github.com/benburleson/one-killer-party/pull/14): [CI run 44844288749](https://github.com/benburleson/one-killer-party/actions/runs/44844288749) passed with Playwright evidence, but [promotion run 44844408798](https://github.com/benburleson/one-killer-party/actions/runs/44844408798) skipped the WIP title. The final title edit did not recheck. The PR is now ready; the actor and exact action that changed its draft state have not been independently established in this record.
 - **New human interventions:** the CI rerun and human merge for #12, plus reporting and dispatching [issue #15](https://github.com/benburleson/one-killer-party/issues/15) for the repeated handoff failure. Do not infer the full intervention count or count this as an autonomous success.
 - **Next trial:** after human security review and merge, observe an independent agent PR completing both event orderings as feasible. Record event delivery, mutation authorization, CI and artifact links, and any human intervention. The proposed recheck and local mock tests are not proof of successful live promotion.
 
-## Trial 3 — Issue #18: M1.3 local Supabase lobby persistence (2026-11-21)
+### Trial 3 — Issue #18: M1.3 local Supabase lobby persistence (2026-11-21)
 
 **Evidence:** [Issue #18](https://github.com/benburleson/one-killer-party/issues/18) · [Draft PR #19](https://github.com/benburleson/one-killer-party/pull/19) · [CI run #42](https://github.com/benburleson/one-killer-party/actions/runs/44858549706) · [Playwright evidence artifact](https://github.com/benburleson/one-killer-party/actions/runs/44858549706/artifacts/14688876341)
 
@@ -85,7 +101,7 @@ Advance from human-created issues to automated issue creation only after the age
 | Outcome | PR #19 remains a draft for human review and human-only merge |
 | Learning | Keep startup output suppressed to protect generated local keys, and make the all-deny RLS decision explicit until reviewed server projections and commands exist |
 
-## M1.5–M1.7 rollout and handoff evidence (2026-11-23)
+### M1.5–M1.7 rollout and handoff evidence (2026-11-23)
 
 **Evidence:** [guest UX PR #32](https://github.com/benburleson/one-killer-party/pull/32) · [M1.6 PR #34](https://github.com/benburleson/one-killer-party/pull/34) · [M1.7 PR #36](https://github.com/benburleson/one-killer-party/pull/36) · [merged-main CI run #90](https://github.com/benburleson/one-killer-party/actions/runs/45087065308)
 
@@ -108,15 +124,11 @@ Advance from human-created issues to automated issue creation only after the age
   passed. The merged `main` SHA then passed CI run #90. These failures are
   evidence of debugging iterations, not a basis for claiming older-SHA runs
   validate a later commit.
-- Promotion is **not verified working**: PR #36 had successful CI run #89 and
-  a nonempty evidence artifact, but promotion [run #89](https://github.com/benburleson/one-killer-party/actions/runs/45086128314)
-  logged a skip claiming no successful current CI run with evidence. The
-  Actions artifact list for CI [run #89](https://github.com/benburleson/one-killer-party/actions/runs/45086012751)
-  shows that artifact existed; the mismatch is unexplained. A human later
-  merged PR #36. A later PR #34 promotion [run #90](https://github.com/benburleson/one-killer-party/actions/runs/45086384293)
-  failed with `Resource not accessible by integration`. Its cause remains
-  unconfirmed; permissions were not broadened. Do not rely on automation for
-  readiness or merge.
+- Promotion did not work: PR #36's edit-triggered promotion
+  [run #89](https://github.com/benburleson/one-killer-party/actions/runs/45086128314)
+  skipped, and PR #34's promotion [run #90](https://github.com/benburleson/one-killer-party/actions/runs/45086384293)
+  failed with `Resource not accessible by integration`. Both are explained in
+  the retirement entry below. A human merged PR #36.
 - The CI workflow's Supabase startup output was fully suppressed, preventing
   diagnosis of an intermittent startup failure reported by the owner. No
   startup failure was established in the runs reviewed here; the workflow now
@@ -124,12 +136,11 @@ Advance from human-created issues to automated issue creation only after the age
   Integration screenshot upload now warns if an earlier failure produced no
   allowlisted screenshots. No DOM, trace, credentials, or raw CLI output is
   added to the artifact.
-- Production status remains unverified: the repo and CI establish merged code
-  and tests, not M1.5/M1.6 remote migration application, production deployment,
-  or a post-M1.7 production smoke test. PR #36's Vercel check was not verified
-  as a production deployment. See the production-operations status table.
+- At this date the repository held no evidence of the M1.5/M1.6 production
+  migrations, deployment or smoke test. The owner has since attested to all
+  three; see [production operations](production-operations.md).
 
-## Automatic draft promotion retired (2026-11-23)
+### Automatic draft promotion retired (2026-11-23)
 
 The owner retired `promote-agent-pr.yml`, its mock unit test and
 `docs/pr-auto-promotion.md`; all three remain in Git history.
@@ -147,3 +158,12 @@ The owner retired `promote-agent-pr.yml`, its mock unit test and
   (promotion 01:05:58, CI complete 01:10:25). Whether the later
   CI-completion trigger would then have promoted those PRs was not examined.
 - Marking a draft ready is now a human step, alongside human review and merge.
+
+### Post-lobby audit (2026-11-23)
+
+[Issue #41](https://github.com/benburleson/one-killer-party/issues/41) ·
+[PR #42](https://github.com/benburleson/one-killer-party/pull/42). The review
+findings, the changes made and the open follow-ups are in the PR description.
+The first agent session ran out of time before the documentation reset; the
+owner requested it, the promotion retirement and the lockdown migration as
+follow-up steps on the same PR.
