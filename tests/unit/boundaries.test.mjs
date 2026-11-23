@@ -27,7 +27,7 @@ test("client components import no server or Node-only library modules", () => {
   for (const { name, text } of clients) {
     const imports = [...text.matchAll(/^import (?!type )[^;]*? from "([^"]+)";$/gms)].map(([, target]) => target);
     for (const target of imports) {
-      assert.doesNotMatch(target, /^node:|server-only|^@\/lib\/(host|supabase)\/|^@\/lib\/lobby\/(core|service|public-characters|index)$|^@\/lib\/request$/,
+      assert.doesNotMatch(target, /^node:|server-only|^@\/lib\/(host|supabase|mystery-content)\/|^@\/lib\/lobby\/(core|service|public-characters|index)$|^@\/lib\/request$/,
         `${name} imports ${target}`);
     }
   }

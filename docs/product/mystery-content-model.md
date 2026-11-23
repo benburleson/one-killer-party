@@ -23,7 +23,7 @@ The game engine **must never serialize the entire authoring object to a client**
 
 ## 2. Content package and version lifecycle
 
-A `MysteryDefinition` has a stable `mysteryId` and immutable `version` (semantic version or version string; precise format OPEN). It includes declared player counts, authoring metadata, cast, ordered acts, events, clues, objectives, relationships, solution and validation information.
+A `MysteryDefinition` has a stable `mysteryId` and immutable `version` (semantic version or version string; a lexical rule is implemented, while version semantics and ordering remain OPEN). It includes declared player counts, authoring metadata, cast, ordered acts, events, clues, objectives, relationships, solution and validation information.
 
 **Required invariants:**
 
@@ -107,6 +107,8 @@ An authoring-package validator should check at minimum:
 10. No contradictory statement is labeled simultaneously as immutable **official evidence** and false in solution canon without explicit explanation (e.g., forgery disclosed as an in-world artifact).
 11. Every release is stable across retries and reconnects; logically identical items have stable IDs.
 12. Authoring package includes a spoiler-free public teaser and a solution explanation connecting at least some evidence to culprit, motive and method.
+
+**Implemented subset:** The [package contract](../architecture/mystery-content-package.md) implements the structural and reference checks in items 1, 2, 4, 5, 6, 11 and 12 for schema version 1, using synthetic fixtures only. It records its modelling choices and what it leaves unenforced (interaction-hook minimums in item 3, timeline-event references in item 6, and all editorial judgements in items 7–10) for owner review. Illustrative shapes in this document, including the example in section 8, are not that schema.
 
 **Not mechanically provable without editorial review:** Whether a mystery is fair, pleasantly challenging, appropriately paced, not reliant on one player speaking, and fun for everyone. Add a reviewer/playtest signoff step rather than pretending static schema validates logical deduction.
 

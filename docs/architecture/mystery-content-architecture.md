@@ -68,17 +68,29 @@ privileges.
 
 ## Proposed immutable package contract
 
-Illustrative domain types, **not existing runtime types**. IDs are stable,
-nonempty canonical identifiers within a version, not authorization tokens.
-Public text must be independently reviewed as spoiler-safe.
+**Implemented contract:** schema version 1 exists as a pure domain module,
+documented in [mystery content package contract](mystery-content-package.md).
+That document and the code are authoritative for field names, ID and version
+rules, canonical encoding and digest scope. The types below remain an
+**illustrative summary** of the accepted direction; they are not the runtime
+types and are not a client-facing shape. IDs are stable, nonempty canonical
+identifiers within a version, not authorization tokens. Public text must be
+independently reviewed as spoiler-safe.
+
+**Digest scope refinement:** an earlier draft placed `digestSha256`,
+`publishedAt` and `provenanceRef` inside the package, which would make the
+digest cover itself. The package now carries only its own `schemaVersion`,
+`mysteryId` and `version`; the digest is computed over the whole package and
+held in the pin and registry (`PublishedVersionRef`). Publication time,
+provenance and approvals are registry-record fields for M2.1b.
 
 ```ts
 type Id = string;
 type ReleasePhase = "ACT_1" | "ACT_2" | "ACT_3";
 type PartyPhase = "LOBBY" | ReleasePhase | "ACCUSATIONS" | "REVEAL" | "COMPLETE";
-type PublishedVersion = {
-  mysteryId: Id; version: string; schemaVersion: number;
-  digestSha256: string; publishedAt: string; provenanceRef: string;
+// Held by a party pin and the registry, never inside the hashed package.
+type PublishedVersionRef = {
+  mysteryId: Id; version: string; schemaVersion: number; digestSha256: string;
 };
 type PublicCharacter = {
   id: Id; publicName: string; archetype: string; description: string;
@@ -106,7 +118,8 @@ type Solution = {
   narrative: string; timeline: string; supportingItemIds: Id[];
 };
 type MysteryDefinition = {
-  publication: PublishedVersion; title: string; publicSynopsis: string;
+  schemaVersion: number; mysteryId: Id; version: string;
+  title: string; publicSynopsis: string;
   supportedPlayerCounts: number[]; characters: PublicCharacter[];
   startingDossiers: StartingDossier[]; murdererBriefing: MurdererBriefing;
   items: ReleasedItem[];
@@ -134,8 +147,8 @@ and supported count `[8]`; one spoiler-safe starting dossier per role; exactly o
 item, objective/relationship, culprit, motive and method references; allowed
 audiences, classifications and release phases; valid event ordering; and
 solution references. Reject unknown types/fields where they could introduce
-unreviewed data. Verify digest over a defined canonical serialization of the
-complete package excluding the digest field itself. Check public fields for
+unreviewed data. Verify the digest over the defined canonical serialization of the
+complete package; the digest is not a package field. Check public fields for
 spoilers and review evidence classification, chronology, core clue coverage,
 and solvability independently of optional missions; automated validation alone
 cannot establish editorial truth or secrecy. The private publishing validator
@@ -270,7 +283,12 @@ objectives/relationships. Motive/method choices and related gameplay questions
 remain open. No new clues, answer options, objectives or story text are specified
 by this ADR. Owner decisions D-026–D-028 settle private future content, preserved versions and ACT_1 murderer timing; they **do not authorize private content publication, migration, or production setup**. Narrative/editorial signoff for O-009–O-016 remains separate.
 
-1. **Package boundary and validation:** With the approved architecture but without permission to provision production infrastructure,
+1. **Package boundary and validation:** *Split into M2.1a and M2.1b. M2.1a
+   (schema, validation, canonical encoding and digest as a pure module with
+   synthetic fixtures) is implemented; see the
+   [package contract](mystery-content-package.md). The loader, registry,
+   projections and storage checks below are M2.1b and are not started.*
+   With the approved architecture but without permission to provision production infrastructure,
    implement private object loader, published-version registry, schema validation, digest and safe projections
    using synthetic fixtures only, no real Blackwood publication; verify private bucket access and nonoverwriting publication behavior. Specify published
    version/pin constraints in a reviewed migration if needed; retain placeholder
