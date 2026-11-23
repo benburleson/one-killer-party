@@ -7,8 +7,6 @@ import { validPartyId, verifiedEmailHost, verifier } from "@/lib/host/core";
 import { serviceRoleClient } from "@/lib/supabase/service-client";
 import { generateRecoveryToken, recoveryTokenVerifier, validRecoveryToken } from "./core";
 import {
-  BLACKWOOD_MYSTERY_ID,
-  BLACKWOOD_MYSTERY_VERSION,
   BLACKWOOD_PUBLIC_CHARACTERS,
   isBlackwoodPackage,
   publicCharacterById,
@@ -118,17 +116,23 @@ export function lobbyService() {
         status: row.status,
         participant_count: row.participant_count,
         assigned_character_id: null,
-        // join_party returns no pin; party creation only issues this placeholder package.
-        mystery_id: BLACKWOOD_MYSTERY_ID,
-        mystery_version: BLACKWOOD_MYSTERY_VERSION,
+        mystery_id: row.mystery_id,
+        mystery_version: row.mystery_version,
       }) : { outcome: row.outcome === "full" ? "full" : "unavailable" } as const;
     },
     async myMemberships(principal: string): Promise<GuestMembership[]> {
       if ((await signedInUser())?.id !== principal) throw new Error("Lobby command unavailable");
       return guestMemberships(principal);
     },
-    async hostRoster(host: string, partyId: string): Promise<{ participants: HostParticipant[]; version: number }> {
-      if (await currentUserId() !== host) throw new Error("Lobby command unavailable");
+    /** One authorized read of the party and its roster for the verified host. */
+    async hostRoster(host: string, partyId: string): Promise<{
+      partyId: string;
+      status: "LOBBY";
+      mysteryId: string;
+      participants: HostParticipant[];
+      version: number;
+    }> {
+      if (!validPartyId(partyId) || await currentUserId() !== host) throw new Error("Lobby command unavailable");
       const partyData = await call("get_host_party", { p_host: host, p_party_id: partyId });
       if (!Array.isArray(partyData) || partyData.length !== 1) throw new Error("Lobby command unavailable");
       const party = partyData[0] as Row;
@@ -159,7 +163,13 @@ export function lobbyService() {
           assignedCharacter,
         };
       });
-      return { participants, version: rosterVersion };
+      return {
+        partyId,
+        status: "LOBBY",
+        mysteryId: party.mystery_id as string,
+        participants,
+        version: rosterVersion,
+      };
     },
     async assignCharacter(
       host: string,

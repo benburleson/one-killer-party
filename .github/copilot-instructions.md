@@ -32,4 +32,4 @@ Use repository code and package scripts as the source of truth; avoid speculativ
 - Match event-dispatch callbacks to the declared return type; do not assume `void` when the dispatcher expects a result. Scope roster locators so they do not also match public role cards.
 - Preserve `useActionState` feedback across `revalidatePath`; do not key/remount forms on refreshed party versions when transient messages must survive. Keep expected-version checks and surface stale-write conflicts without silently overwriting the host's selection.
 - Keep host and guest roles in separate browser contexts. Local integration tests use disposable Supabase, never production credentials.
-- Read [workflow setup](../docs/workflow-setup.md), [promotion policy](../docs/pr-auto-promotion.md), and [production operations](../docs/production-operations.md) instead of duplicating their detailed procedures here.
+- Read [workflow setup](../docs/workflow-setup.md) and [production operations](../docs/production-operations.md) instead of duplicating their detailed procedures here.

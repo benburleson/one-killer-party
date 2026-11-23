@@ -369,9 +369,10 @@ changing product policy, but their security invariants require tests.
 - [Mystery content model](../product/mystery-content-model.md) — §1
   projections and §7 conceptual persistence.
 - [Product vision](../product/product-vision.md) — MVP and environment status.
-- [M1.1 lobby foundation](lobby-foundation.md) and
-  [`src/lib/lobby/index.ts`](../../src/lib/lobby/index.ts) — domain contracts
-  and safe projections.
+- The M1.1 projection prototype (`src/lib/lobby/index.ts` and its
+  `lobby-foundation.md` note) was never used at runtime and was removed on
+  2026-11-23; the live projections are in
+  [`src/lib/lobby/service.ts`](../../src/lib/lobby/service.ts).
 - [Agent development lifecycle](../agent-development-lifecycle.md),
   [agent evaluation](../agent-evaluation.md), and
   [Copilot instructions](../../.github/copilot-instructions.md).

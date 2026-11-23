@@ -88,7 +88,6 @@ If a later trial reveals another approval gate, record which GitHub setting or w
 | --- | --- | --- | --- |
 | [`ci.yml`](../.github/workflows/ci.yml) | `pull_request` to `main`, `push` to `main`, `workflow_dispatch`; independent local DB/RLS, lint-unit-type-build, CodeQL, browser smoke, and local-Supabase integration jobs | Default `contents: read`; only CodeQL adds `security-events: write` and `actions: read`. Supabase is disposable/local. No production credentials. | Preserved job and trigger boundaries. Startup failures now report only exit/Docker/container-state categories; allowlisted integration evidence warns if absent instead of adding a second failure. |
 | [`copilot-setup-steps.yml`](../.github/workflows/copilot-setup-steps.yml) | Manual dispatch, or push/PR touching only this workflow; installs Node 22, npm dependencies, Chromium | `contents: read`; no production credentials | No change; setup remains separate from CI and Codespaces. |
-| [`promote-agent-pr.yml`](../.github/workflows/promote-agent-pr.yml) | `workflow_run` after CI completion and `pull_request_target` for edits to a draft | `actions: read`, `contents: read`, `pull-requests: write`; trusted workflow does not checkout or execute PR code | No eligibility, permission, artifact-trust, or trigger change. See [promotion policy](pr-auto-promotion.md) for the observed evidence mismatch and mutation failure. |
 
 CI's check/job names are visible in Actions, but this repository review could
 not inspect GitHub branch-protection/ruleset settings. The owner must verify
@@ -101,17 +100,22 @@ all output, including the distinction between an unavailable Docker daemon and
 a CLI/container startup failure. They still suppress raw output and now emit
 only categorical diagnostics on failure. Integration screenshot upload
 previously used `if-no-files-found: error`; it now warns if an earlier failure
-prevented evidence creation. The promotion eligibility rule remains unchanged:
-the `playwright-evidence` name and nonempty requirement are preserved, while
-its payload is narrowed to the landing-page screenshot rather than all test
-results and HTML reports. Human review should confirm this allowlist remains
-credential-free. No promotion permission, trigger, or readiness-rule change
-is proposed.
+prevented evidence creation. The smoke job's `playwright-evidence` artifact
+contains only the landing-page screenshot.
 
-The PR template's headings match the promotion parser: `Validation`,
-`Screenshots and browser evidence`, and `Human verification steps`. For a
-docs-only PR, state that changed-UI screenshots are not applicable; do not
-fabricate a screenshot. Promotion still requires a successful current-SHA CI
-run with a nonempty `playwright-evidence` artifact, which can be the real
-credential-free landing-page smoke evidence. It is not a screenshot of the
-documentation and does not replace human review.
+## Draft PRs are marked ready by a human
+
+There is no automatic draft promotion. The `promote-agent-pr.yml` workflow was
+retired on 2026-11-23 at the owner's decision: in the promotion runs whose
+logs were read, GitHub rejected `markPullRequestReadyForReview` for the
+workflow token with `Resource not accessible by integration`, and no
+successful live promotion was recorded. Retiring it also removes the
+repository's only `pull_request_target` trigger and its only
+`pull-requests: write` workflow token. The run history is kept in
+[agent evaluation](agent-evaluation.md).
+
+An agent PR stays a draft until a human reviews the handoff, confirms a
+successful CI run on the current head SHA, and marks it ready. The PR
+template's `Validation`, `Screenshots and browser evidence` and
+`Human verification steps` sections are still required. For a docs-only PR,
+state that changed-UI screenshots are not applicable; do not fabricate one.

@@ -42,28 +42,43 @@ SELECT is(
   NULL, 'browser roles hold no privilege on any public table or view'
 );
 SELECT is(
-  (SELECT pg_catalog.string_agg(browser.rolname || ':' || c.relname, ', ' ORDER BY c.relname, browser.rolname)
+  (SELECT pg_catalog.string_agg(
+     browser.rolname || ':' || privilege.name || ':' || c.relname, ', '
+     ORDER BY c.relname, browser.rolname, privilege.name)
    FROM pg_catalog.pg_class AS c
    JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
    CROSS JOIN (VALUES ('anon'), ('authenticated')) AS browser(rolname)
+   CROSS JOIN (VALUES ('USAGE'), ('SELECT'), ('UPDATE')) AS privilege(name)
    WHERE n.nspname = 'public' AND c.relkind = 'S'
-     AND pg_catalog.has_sequence_privilege(browser.rolname, c.oid, 'USAGE, SELECT')),
-  NULL, 'browser roles cannot read or advance any public sequence'
+     AND pg_catalog.has_sequence_privilege(browser.rolname, c.oid, privilege.name)),
+  NULL, 'browser roles hold no privilege on any public sequence'
 );
--- Known gap, not fixed here because it needs an owner-approved migration:
--- the audit identity sequence inherits UPDATE (setval) for browser roles from
--- the default ACL. It is not reachable through the exposed API. This accepts
--- only that one existing sequence, or none once it is revoked.
+
+-- Objects created by a later migration must not inherit browser grants.
+CREATE TABLE public.default_privilege_probe (id bigserial PRIMARY KEY);
 SELECT ok(
-  coalesce((SELECT pg_catalog.string_agg(browser.rolname || ':' || c.relname, ', ' ORDER BY c.relname, browser.rolname)
-   FROM pg_catalog.pg_class AS c
-   JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
-   CROSS JOIN (VALUES ('anon'), ('authenticated')) AS browser(rolname)
-   WHERE n.nspname = 'public' AND c.relkind = 'S'
-     AND pg_catalog.has_sequence_privilege(browser.rolname, c.oid, 'UPDATE')), '')
-  IN ('', 'anon:participant_recovery_audit_id_seq, authenticated:participant_recovery_audit_id_seq'),
-  'no sequence other than the known audit identity sequence grants UPDATE to browser roles'
+  NOT pg_catalog.has_table_privilege('anon', 'public.default_privilege_probe',
+    'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+  AND NOT pg_catalog.has_table_privilege('authenticated', 'public.default_privilege_probe',
+    'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN'),
+  'a newly created public table grants nothing to browser roles by default'
 );
+SELECT ok(
+  NOT pg_catalog.has_sequence_privilege('anon', 'public.default_privilege_probe_id_seq', 'USAGE, SELECT, UPDATE')
+  AND NOT pg_catalog.has_sequence_privilege('authenticated', 'public.default_privilege_probe_id_seq', 'USAGE, SELECT, UPDATE'),
+  'a newly created public sequence grants nothing to browser roles by default'
+);
+DROP TABLE public.default_privilege_probe;
+
+SET LOCAL ROLE anon;
+SELECT throws_ok(
+  $$SELECT pg_catalog.setval('public.participant_recovery_audit_id_seq', 5)$$,
+  '42501', NULL, 'the anonymous role cannot reset the audit sequence');
+SET LOCAL ROLE authenticated;
+SELECT throws_ok(
+  $$SELECT pg_catalog.setval('public.participant_recovery_audit_id_seq', 5)$$,
+  '42501', NULL, 'the authenticated role cannot reset the audit sequence');
+RESET ROLE;
 
 SELECT ok(
   (SELECT count(*) FROM pg_catalog.pg_proc AS p
@@ -124,10 +139,26 @@ SELECT results_eq(
   $$VALUES (true)$$, 'host B creates party B'
 );
 SELECT results_eq(
-  $$SELECT outcome FROM public.join_party(
+  $$SELECT outcome, party_id, mystery_id, mystery_version FROM public.join_party(
     '00000000-0000-4000-8000-000000000403', decode(repeat('a1', 32), 'hex'),
     'Guest A', decode(repeat('c1', 32), 'hex'))$$,
-  $$VALUES ('joined'::text)$$, 'guest A joins party A'
+  $$VALUES ('joined'::text, '10000000-0000-4000-8000-000000000401'::uuid,
+    'blackwood-affair'::text, 'first-playtest-placeholder-v1'::text)$$,
+  'a successful join returns the party''s own pinned mystery ID and version'
+);
+SELECT results_eq(
+  $$SELECT outcome, mystery_id, mystery_version FROM public.join_party(
+    '00000000-0000-4000-8000-000000000403', decode(repeat('a1', 32), 'hex'),
+    'Guest A', decode(repeat('c1', 32), 'hex'))$$,
+  $$VALUES ('joined'::text, 'blackwood-affair'::text, 'first-playtest-placeholder-v1'::text)$$,
+  'an idempotent repeat join returns the same pin'
+);
+SELECT results_eq(
+  $$SELECT outcome, party_id, mystery_id, mystery_version FROM public.join_party(
+    '00000000-0000-4000-8000-000000000405', decode(repeat('ff', 32), 'hex'),
+    'Nobody', decode(repeat('c3', 32), 'hex'))$$,
+  $$VALUES ('unavailable'::text, NULL::uuid, NULL::text, NULL::text)$$,
+  'a rejected join discloses no party or package identifier'
 );
 SELECT results_eq(
   $$SELECT outcome FROM public.join_party(

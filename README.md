@@ -94,7 +94,7 @@ For setup details and known limitations, see [development environments](docs/dev
 
 ## How to explore the showcase
 
-Start with [the lifecycle](docs/agent-development-lifecycle.md) and [environment setup](docs/workflow-setup.md); inspect public [issues](https://github.com/benburleson/one-killer-party/issues), [pull requests](https://github.com/benburleson/one-killer-party/pulls), and [Actions runs](https://github.com/benburleson/one-killer-party/actions). See the [evaluation rubric](docs/agent-evaluation.md) for measured autonomy and the [draft promotion policy](docs/pr-auto-promotion.md).
+Start with [the lifecycle](docs/agent-development-lifecycle.md) and [environment setup](docs/workflow-setup.md); inspect public [issues](https://github.com/benburleson/one-killer-party/issues), [pull requests](https://github.com/benburleson/one-killer-party/pulls), and [Actions runs](https://github.com/benburleson/one-killer-party/actions). See the [evaluation rubric](docs/agent-evaluation.md) for measured autonomy. Draft PRs are marked ready and merged by a human; automatic draft promotion was retired.
 
 ## Stack and safety
 

@@ -84,6 +84,19 @@ the assignment and safe-read RPC projections. It does not add story content.
 All migration and integration tests must use the disposable local Supabase
 project; do not link or reset the production database.
 
+`20261123000000_browser_role_lockdown_and_join_pin.sql` is **not applied to
+Production**; merging does not authorize it. It revokes every remaining
+browser-role privilege on `public` tables and sequences (the recovery-audit
+sequence previously allowed `setval`), stops future tables and sequences from
+inheriting browser grants, and makes `join_party` return the party's pinned
+mystery ID and version. **Apply it before deploying the matching app
+version:** the new server rejects a join whose RPC response lacks the pin,
+while the previous app version keeps working against the migrated database.
+The default-privilege change applies to objects created by the role that runs
+the migration; confirm the result on the target with the catalog queries in
+`supabase/tests/security_invariants.test.sql` rather than assuming the local
+default ACLs match Production.
+
 For M1.5/M1.6 and other future production changes:
 
 1. Explicitly verify the linked **target project and environment**; inspect the target database and existing migration history. Plan backup/restore and rollback for destructive or data-changing operations.

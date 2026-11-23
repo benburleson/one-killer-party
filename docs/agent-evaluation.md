@@ -128,3 +128,22 @@ Advance from human-created issues to automated issue creation only after the age
   and tests, not M1.5/M1.6 remote migration application, production deployment,
   or a post-M1.7 production smoke test. PR #36's Vercel check was not verified
   as a production deployment. See the production-operations status table.
+
+## Automatic draft promotion retired (2026-11-23)
+
+The owner retired `promote-agent-pr.yml`, its mock unit test and
+`docs/pr-auto-promotion.md`; all three remain in Git history.
+
+- Promotion runs [#90](https://github.com/benburleson/one-killer-party/actions/runs/45086384293)
+  and [#99](https://github.com/benburleson/one-killer-party/actions/runs/45090733134)
+  reached the ready-for-review mutation and GitHub answered
+  `FORBIDDEN: Resource not accessible by integration`. Run #94 also failed;
+  its log was not read. No successful live promotion was recorded. The cause
+  of the rejection was not established and permissions were never broadened.
+- The earlier "unexplained evidence mismatch" for PR #36 is explained by run
+  timestamps: the edit-triggered promotion job ran at 23:59:09 UTC while CI
+  run #89 for that SHA did not complete until 00:01:45 UTC, so no successful
+  CI run existed yet and the skip was correct. PR #40 showed the same order
+  (promotion 01:05:58, CI complete 01:10:25). Whether the later
+  CI-completion trigger would then have promoted those PRs was not examined.
+- Marking a draft ready is now a human step, alongside human review and merge.
