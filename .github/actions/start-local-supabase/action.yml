@@ -1,25 +1,32 @@
-# Shared by the CI jobs that need the disposable local Supabase stack.
-# Takes no inputs, secrets or expressions and runs with the calling job's
-# permissions. Raw CLI output stays suppressed because it prints local keys;
-# failures report only categorical diagnostics.
+# Shared by CI jobs that need a disposable local Supabase stack.
+# Takes no inputs or secrets and runs with the calling job's permissions.
+# Supabase CLI output can contain local credentials, so never log it.
 name: Start disposable local Supabase
-description: Start the local Supabase stack with output suppressed and categorical failure diagnostics.
+description: Start local Supabase with bounded retries and redacted diagnostics.
 runs:
   using: composite
   steps:
     - name: Start disposable local Supabase
       shell: bash
       run: |
-        if npx supabase start >/dev/null 2>&1; then
-          exit 0
-        else
-          exit_code=$?
-          echo "::error::Supabase CLI start failed (exit code ${exit_code}); raw output was suppressed."
+        # Image pulls and container initialization occasionally fail transiently
+        # on GitHub-hosted runners. Retry startup, not the integration tests.
+        max_attempts=3
+        for ((attempt=1; attempt<=max_attempts; attempt++)); do
+          echo "Starting local Supabase (attempt ${attempt}/${max_attempts})"
+          if npx supabase start >/dev/null 2>&1; then
+            echo "Local Supabase started successfully."
+            exit 0
+          fi
+
+          echo "::warning::Local Supabase startup failed (attempt ${attempt}/${max_attempts}); CLI output redacted."
           if docker info >/dev/null 2>&1; then
             echo "Docker daemon: reachable"
           else
-            echo "Docker daemon: unavailable"
+            echo "::error::Docker daemon: unavailable"
+            exit 1
           fi
+
           container_states="$(docker ps -a --filter 'name=one-killer-party' --format '{{.Status}}' 2>/dev/null | head -n 12 || true)"
           if [[ -n "$container_states" ]]; then
             echo "Matching Supabase container states (status only):"
@@ -27,5 +34,16 @@ runs:
           else
             echo "Matching Supabase container states: none reported"
           fi
-          exit "$exit_code"
-        fi
+
+          if (( attempt == max_attempts )); then
+            echo "::error::Supabase CLI start failed after ${max_attempts} attempts; raw output suppressed."
+            exit 1
+          fi
+
+          # A failed startup can leave partially created containers/volumes.
+          # CI uses an isolated disposable project, never a persistent database.
+          npx supabase stop --project-id one-killer-party --no-backup >/dev/null 2>&1 || true
+          delay=$((attempt * 15))
+          echo "Retrying local Supabase startup in ${delay}s."
+          sleep "$delay"
+        done
