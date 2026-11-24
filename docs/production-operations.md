@@ -246,6 +246,139 @@ No Production publishing command is available until an owner selects and
 approves the issuer and approval provider. Neither local CLI is a Production
 publishing target.
 
+### Production publisher review artifact (M2.1f-a)
+
+**Code review is not activation.** The separately reviewed
+`scripts/production-publisher-hook-review.sql` is not a migration and does not
+enable an Auth hook or create a publisher identity. The local example below
+must never be used as a Production hook. The proposed artifact maps a single
+Auth UUID in a non-public table, preserves unrelated token claims, and adds a
+server-side `aal2` and current-mapping check to both private Storage access and
+the registration RPC. The Auth hook alone is **not** an MFA boundary.
+Production publishing remains blocked until the identity-backed, revocable
+owner-approval verifier described above is selected, approved and demonstrated;
+an in-memory confirmation is not that verifier.
+
+The candidate configuration validator expects an explicitly selected
+`MYSTERY_PRODUCTION_PROJECT_REF`, matching
+`MYSTERY_PRODUCTION_SUPABASE_URL` (`https://<project-ref>.supabase.co`),
+`MYSTERY_PRODUCTION_ANON_KEY` (publishable or project anon key), and the
+dedicated `MYSTERY_PUBLISHER_EMAIL` and `MYSTERY_PUBLISHER_USER_ID`. These
+are configuration inputs, not authority to publish. The candidate Keychain
+label is `one-killer-party.mystery-publisher.production.<project-ref>` and
+the account is the UUID. No Production values are checked in. The CLI
+currently rejects `--target production` with
+`PRODUCTION_AUTHORIZATION_NOT_IMPLEMENTED` before contacting the project or
+enrolling a Production credential. These candidate validators and labels are
+not yet a complete production publication workflow.
+
+Two independent gates remain:
+
+1. **Owner-run read-only Production preflight and security review.** Complete
+   the inspection below, compare existing grants, policies, functions and Auth
+   hook configuration with the reviewed design, and stop on any mismatch or
+   existing hook. An existing hook must not be overwritten; any composition
+   requires its own review. Verify backup and recovery before requesting
+   authorization for changes.
+2. **Separately approved Production Auth provisioning and synthetic rehearsal.**
+   Only after approval may the owner provision a dedicated user and TOTP,
+   install and configure the reviewed boundary, and rehearse using synthetic
+   content. Prove ordinary host magic-link/OTP and anonymous guest sign-in
+   still work; prove publisher `aal1` cannot insert/read private objects or
+   register and `aal2` can, while ordinary and anonymous identities cannot
+   read private bytes or publish. Record only redacted results. No Production
+   changes or rehearsal are authorized by this PR or its CI.
+
+For revocation, stop publishing and remove the private UUID mapping under an
+approved administrative procedure. The reviewed SQL checks the mapping at
+each Storage and registration request, so removal is intended to deny even
+previously issued publisher tokens at those boundaries. Also revoke Auth
+sessions, rotate the password and TOTP as appropriate, and account for tokens
+already issued elsewhere and privileged roles that bypass RLS. Confirm the
+denial in a disposable rehearsal; restoring the same UUID mapping can
+reactivate an unexpired token, so revoke sessions and wait out its lifetime
+before remapping. Do not assume disabling a hook invalidates existing JWTs.
+Before hook rollback, stop new issuance and remove the mapping;
+restore any prior hook only through a separately reviewed plan. Do not remove
+the MFA policies or restore the unguarded RPC while publisher tokens remain
+usable. Never weaken private-bucket immutability to resolve an orphan.
+
+After both gates and an explicit authorization for the change, the owner can
+install the reviewed SQL from a trusted checkout in an authenticated `psql`
+session whose database target has been independently verified:
+
+```text
+\set ON_ERROR_STOP on
+\i scripts/production-publisher-hook-review.sql
+INSERT INTO private_mystery.production_publisher_identity (user_id)
+VALUES ('<APPROVED-PUBLISHER-AUTH-UUID>'::uuid);
+```
+
+Replace the placeholder privately, not in a committed file. The script does
+not activate Auth. If the Auth custom-access-token hook is already configured,
+stop; do not overwrite it. After separate approval, select
+`private_mystery.production_publisher_hook` as the custom-access-token hook
+using the supported Supabase configuration interface and verify the resulting
+configuration. The installation is idempotent only in the absence of drift:
+on a repeat it does not repair modified objects. Inspect the objects and grants
+before and after installation, and stop on collisions or unexpected state.
+
+To revoke the publisher, the authorized owner can remove the mapping in the
+same independently verified database:
+
+```sql
+DELETE FROM private_mystery.production_publisher_identity
+WHERE user_id = '<APPROVED-PUBLISHER-AUTH-UUID>'::uuid;
+```
+
+Confirm the old token is denied, revoke the Auth session, and rotate the
+credential. When rolling back, first remove the mapping and disable the
+publisher hook; restore a prior hook only if its exact configuration and
+composition have been reviewed. Leave the restrictive policy and guarded RPC
+in place until all old tokens have expired or are otherwise demonstrably
+ineffective. Removing those guards requires a separately reviewed database
+rollback and verification; simply disabling the hook is not a safe rollback.
+
+#### macOS Keychain experiment
+
+The Keychain integration can currently be exercised only with the disposable
+local publisher above; Production targeting is blocked in code pending the
+approved identity-backed verifier, not enabled by setting environment values.
+Install dependencies with `npm ci`, configure the disposable local user and
+environment as below, and enroll a verified TOTP factor for that user. Then
+run these commands in an interactive macOS terminal:
+
+```sh
+npm run mystery:publish -- --target local --enroll-keychain
+npm run mystery:publish -- --target local --keychain /absolute/path/to/synthetic-package.json
+```
+
+The first command prompts without echo for the password and a TOTP code,
+verifies them against local Auth, and stores the password under the Keychain
+service `one-killer-party.mystery-publisher.local`, with the user UUID as the
+account. The second retrieves it, signs in afresh, prompts for TOTP and requires
+`PUBLISH` for the displayed package. Passwords accepted by this experiment
+must use only ASCII letters, digits, `_` or `-`; choose a long random one.
+macOS may prompt to unlock the Keychain or permit access; deny unexpected
+requests. No password is passed in process arguments or written to a file.
+Keep the Keychain locked when not in use and never store a service-role key,
+signing secret, Management API PAT, or database password in this entry.
+
+To remove the local entry, use Keychain Access or, with the local UUID still
+set in the shell:
+
+```sh
+security delete-generic-password -s one-killer-party.mystery-publisher.local -a "$MYSTERY_PUBLISHER_USER_ID"
+```
+
+For rotation, stop publishing, remove the old mapping and revoke sessions,
+rotate the dedicated user's password and TOTP using the approved Auth
+procedure, delete the old Keychain entry, then enroll the new credential after
+the identity mapping has been restored. On device compromise, immediately
+revoke the mapping and sessions from a trusted device, rotate the credentials
+and review access and orphaned objects; do not assume Keychain deletion
+invalidates tokens already issued.
+
 ### Local Auth publisher experiment
 
 This procedure is **only for a disposable local Supabase stack and synthetic
