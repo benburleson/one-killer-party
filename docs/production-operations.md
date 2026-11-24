@@ -122,25 +122,31 @@ derives a short-lived custom-role JWT from the local project JWT secret. This is
 a production operator credential design: the project signing secret is too
 broad to treat as a separately scoped production publisher credential.
 
-### Owner publisher decision and unresolved credential (M2.1d)
+### Owner publisher decision and production activation gate (M2.1d)
 
 **Decision, 2026-11-24:** the owner alone authorizes publication. A second
-human approver or standing web approval service is not required. The desired
-approval is an authenticated owner explicitly confirming the exact target,
-project, package ID/version/schema, canonical SHA-256 digest and rule set.
-Confirmation flags or self-reported metadata alone do not authenticate the
-owner. A verifier must enforce this binding, expiry and revocation and be
-rechecked before registration; retain identity, time, provenance and approval
-reference in the audit record. This policy does not enable Production.
+human approver or independent approval service is not required. The approved
+approval is an MFA-authenticated owner session plus an exact interactive
+confirmation of the target, project, package ID/version/schema, canonical
+SHA-256 digest and rule set. The CLI must bind the confirmation to those
+values, recheck the session immediately before registration, and retain
+identity, time, provenance and approval reference in the audit record.
+Confirmation flags or self-reported metadata without that authenticated
+session are not authorization.
 
-**Recommendation: no-go for a Production publisher until a genuinely scoped
-credential and owner authentication are demonstrated.** The existing local
-CLI is a disposable test harness, not a Production owner workflow. A separate
-local Auth experiment is described below; it does not supply a Production
-credential or independently verified Production approval. Do not put a project signing
-key in Keychain and call it a scoped credential: possession permits minting
-other roles. A bearer token stored there is only as restricted, short-lived
-and revocable as its actual issuer and Supabase trust configuration.
+This approval does **not** create separation of duties. The owner-controlled
+MFA account/session, Supabase Auth configuration and privileged database
+administrators remain trusted; compromise of the session, device or those
+administrative controls could authorize publication. The exact confirmation
+limits accidental or unattended publication but is not an independent
+verification service.
+
+Production remains disabled until the owner provisions the approved
+production identity/session and mapping, confirms MFA and credential custody,
+and completes the separately approved synthetic publication and recovery
+rehearsal. No Production target, credential or package is configured by this
+documentation change. The existing local CLI remains a disposable test
+harness until those gates are completed.
 
 `npx supabase login` authenticates the CLI to the **Management API**; listing
 projects does not authorize Storage or the publication RPC as
@@ -169,53 +175,30 @@ confirmation; cancellation or failed verification must cause no writes. The
 owner must first decide between the following alternatives, after current
 official documentation and a disposable end-to-end proof are available:
 
-1. **Preferred if feasible:** a supported issuer that authenticates only the
-   owner and issues short-lived, revocable `mystery_operator` tokens without
-   exposing project-wide signing authority to the publisher. A Keychain may
-   hold an owner credential or refresh token, not manufacture trust. Determine
-   provider, claim mapping, MFA, audit retention, costs and trusted-key blast
-   radius before choosing it. The issuer may require new infrastructure.
-2. **If no such standalone mechanism exists:** an isolated owner-operated
-   issuer/runner with tightly controlled signing authority and an independently
-   enforced role-issuance policy. It is additional trusted infrastructure, not
-   a scoped signing key; compromise of the trusted signer can affect other
-   roles. Review operational costs and privileged-key custody explicitly.
+The approved direction is an owner-operated MFA-authenticated session, not a
+separate issuer or approval provider. The follow-up must specify the
+production identity mapping, session expiry/revocation, MFA assurance,
+credential custody, compromise recovery, and prove both Storage and RPC
+behavior in a disposable environment. Production Auth changes, credential
+issuance, remote writes and synthetic rehearsal remain separately authorized
+human operations after review.
 
-Neither option is verified here or approved for provisioning. The follow-up
-must specify literal setup commands, Keychain access controls (if used), token
-expiry and revocation, key rotation and compromise recovery, and prove both
-Storage and RPC behavior in a disposable environment. Production Auth changes,
-credential issuance, remote writes and synthetic rehearsal remain separately
-authorized human operations after review.
+### Credential trust boundary
 
-### Credential trust options (unverified proposals)
-
-No Production issuer, credential, CLI target, or approval provider is
-configured. The selected Supabase database grants are narrow, but a token must
-still be signed by a key that Supabase trusts and carry the exact
-`role: mystery_operator` claim. PostgREST extracts the role claim and assumes
-that PostgreSQL role only when the JWT signature is trusted and the role is
-granted to `authenticator`; Storage independently validates the bearer JWT and
-uses the role for its RLS checks. A random OIDC token, anon key, or new API key
-does not acquire this role. See Supabase's [JWT guide](https://supabase.com/docs/guides/auth/jwts),
+No Production credential or CLI target is configured. The selected Supabase
+database grants are narrow, but the MFA-authenticated session must still
+produce a project-trusted token carrying the exact `role: mystery_operator`
+claim. PostgREST extracts the role claim and assumes that PostgreSQL role only
+when the JWT signature is trusted and the role is granted to `authenticator`;
+Storage independently validates the bearer JWT and uses the role for its RLS
+checks. A random OIDC token, anon key, or new API key does not acquire this
+role. See Supabase's [JWT guide](https://supabase.com/docs/guides/auth/jwts),
 [signing keys guide](https://supabase.com/docs/guides/auth/signing-keys),
 [third-party Auth overview](https://supabase.com/docs/guides/auth/third-party/overview),
 and [PostgREST JWT role claims](https://postgrest.org/en/stable/references/auth.html).
 The official docs source was reviewed; live docs access was unavailable from
 the development environment.
 
-| Candidate | Validation and role mapping | Tradeoffs / decision |
-| --- | --- | --- |
-| Owner-controlled issuer with a dedicated asymmetric Supabase-trusted signing key | Only if the selected key/import mechanism is supported for externally minted tokens: Supabase's signing-key/JWKS trust must validate signatures; issuer creates a short-lived JWT with `role=mystery_operator`, expected audience/issuer and subject. PostgREST applies the role only if `authenticator` has membership; Storage validates the same project token independently. | **Fallback for review, not activated or proven.** Private key stays in an owner-controlled issuer/HSM; operators authenticate with MFA and receive only a short-lived token. Key configuration, issuer infrastructure, policy that can sign only this role, audit storage, rotation and revocation require owner-selected design and may incur cost. A compromised trusted signing key can potentially mint other roles, including privileged roles; role restriction in issuer policy is essential, not a Supabase-enforced restriction. Require a disposable proof against both Storage and RPC before any production decision. |
-| Supported third-party OIDC integration | Supabase documents supported third-party JWT verification through the provider's asymmetric OIDC/JWKS keys. Data API role resolution still depends on a valid PostgREST role claim and granted database role. Do not assume the managed integration maps an external operator identity to `mystery_operator`; verify the exact provider claim mapping and Storage behavior in a disposable project first. | Not selected. Requires owner-configured Auth integration, claim mapping proof, issuer key-rotation/revocation timing review, MFA assurance and possible third-party-user billing. Direct production config changes are prohibited here. |
-| Operator-only execution environment calling Supabase | The environment does not create Supabase authority by itself; it must receive a Supabase-trusted short-lived JWT or use an owner-controlled issuer. Its API call still passes through Storage/PostgREST role validation and the SQL grants. | Useful as a controlled front end, but not a credential solution alone. Must not contain `service_role` or the project-wide JWT signing secret. Adds identity, logging, runtime and recovery costs; owner approval required. |
-
-Supabase supports asymmetric Auth signing keys and external OIDC providers, but
-the repository has no production Supabase signing-key configuration or issuer
-proof. A disposable local project's legacy `SUPABASE_JWT_SECRET` proof does not
-prove that a separately scoped production key will be accepted by both managed
-Storage and PostgREST. These options therefore remain design proposals; do not
-provision them or change Production Auth settings in this issue.
 Never give publisher operators `SUPABASE_SERVICE_ROLE_KEY` or the broad
 project JWT signing secret, and do not substitute a long-lived database
 credential. `service_role` still bypasses RLS and has broad Storage access;
@@ -226,25 +209,21 @@ No mechanism here claims isolation from those privileged credentials.
 | --- | --- | --- |
 | `anon` / `authenticated` browser roles | No package bucket listing/read/write; no registry access or publication RPC | Verify both Storage policies and RPC/table grants; route absence alone is insufficient |
 | Runtime `service_role` | Exact-reference registry lookup and private object read through the server-only loader | Bypasses RLS and retains broad Storage API powers; can read unregistered orphans and must remain server-only |
-| `mystery_operator` | Package object `SELECT`/`INSERT` and `publish_mystery_version` only | Cannot directly read registry or use ordinary API deletion; no production identity issuer exists |
-| Proposed issuer / publisher operator | Issue/receive a short-lived token scoped to `mystery_operator`; invoke Storage and registration only | Not implemented. Compromise of a signing key capable of signing arbitrary role claims may escalate beyond intended grants |
+| `mystery_operator` | Package object `SELECT`/`INSERT` and `publish_mystery_version` only | Cannot directly read registry or use ordinary API deletion; production mapping is not provisioned |
+| Owner MFA session / publisher operator | Receive a short-lived token scoped to `mystery_operator`; invoke Storage and registration only after exact interactive confirmation | Approved direction, but not provisioned or rehearsed. Compromise of the owner session or trusted signing/admin controls may authorize publication or escalate beyond intended grants |
 | Database owner / superuser | Administrative recovery and schema maintenance | Can bypass RLS, alter registry or disable triggers; trusted administrator boundary remains |
 
-The reusable publisher now requires an approval verifier to return a fresh,
-at-most-15-minute authorization bound to environment, exact Supabase project
-reference, package ID/version/schema, canonical digest and exact rule set. The
-production verifier must verify an owner-approved signed artifact or
-identity-backed approval, owner authentication, revocation, expiry and
-idempotent verification only for the same binding. MFA assurance is a
-credential-design gate to be decided and verified by the owner. The publisher
-rechecks the same approval immediately before registry insertion, after upload
-and readback. Its immutable approval ID/reference and identity/time evidence
-must be recorded in the registry/audit system. A bare `--approved-by` or
-`--approval-reference` is never authorization. The local confirmation adapters are experiments, not independently
-verifiable production approval.
-No Production publishing command is available until an owner selects and
-approves the issuer and approval provider. Neither local CLI is a Production
-publishing target.
+The reusable publisher requires the MFA-authenticated owner session and exact
+interactive confirmation to bind environment, exact Supabase project
+reference, package ID/version/schema, canonical digest and exact rule set. It
+rechecks the session and confirmation immediately before registry insertion,
+after upload and readback. Its immutable approval ID/reference and
+identity/time evidence must be recorded in the registry/audit system. A bare
+`--approved-by` or `--approval-reference` is never authorization. No
+independent approval service or second human is required; the owner session
+and Supabase administrative trust boundary remain explicit limitations.
+Production publishing remains disabled until the owner provisions and
+rehearses this workflow.
 
 ### Production publisher review artifact (M2.1f-a)
 
@@ -255,9 +234,10 @@ must never be used as a Production hook. The proposed artifact maps a single
 Auth UUID in a non-public table, preserves unrelated token claims, and adds a
 server-side `aal2` and current-mapping check to both private Storage access and
 the registration RPC. The Auth hook alone is **not** an MFA boundary.
-Production publishing remains blocked until the identity-backed, revocable
-owner-approval verifier described above is selected, approved and demonstrated;
-an in-memory confirmation is not that verifier.
+Production publishing remains blocked until the owner provisions the
+identity-backed, revocable MFA session and demonstrates the exact
+confirmation workflow in the approved rehearsal; this is owner approval, not
+an independent verifier.
 
 The candidate configuration validator expects an explicitly selected
 `MYSTERY_PRODUCTION_PROJECT_REF`, matching
@@ -266,11 +246,11 @@ The candidate configuration validator expects an explicitly selected
 dedicated `MYSTERY_PUBLISHER_EMAIL` and `MYSTERY_PUBLISHER_USER_ID`. These
 are configuration inputs, not authority to publish. The candidate Keychain
 label is `one-killer-party.mystery-publisher.production.<project-ref>` and
-the account is the UUID. No Production values are checked in. The CLI
-currently rejects `--target production` with
-`PRODUCTION_AUTHORIZATION_NOT_IMPLEMENTED` before contacting the project or
-enrolling a Production credential. These candidate validators and labels are
-not yet a complete production publication workflow.
+the account is the UUID. No Production values are checked in. Production enrollment remains disabled;
+`--target production --keychain` is the supported routine path once the
+owner-approved mapping exists, while `--enroll-keychain` is rejected for the
+Production target. The CLI still requires the separate provisioning,
+preflight and rehearsal gates below before any live use.
 
 Two independent gates remain:
 
@@ -645,8 +625,8 @@ registered or referenced object across deployments and rollback.
 
 This is a future checklist only, not authorized or executed by this issue. It
 requires reviewed code, an independently verified read-only preflight, owner
-selection of issuer and approval policy, approved encrypted backups with a
-successful isolated restore, and a separate written authorization naming the
+provisioning of the MFA session and exact-confirmation mapping, approved
+encrypted backups with a successful isolated restore, and a separate written authorization naming the
 exact synthetic package identity/digest/rule set/Production project. After
 those gates, an owner-operated session may verify identity and
 short expiry, review the safe summary, publish only a non-story synthetic

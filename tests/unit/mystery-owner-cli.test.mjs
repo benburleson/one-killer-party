@@ -66,7 +66,7 @@ test("cancel, EOF and authentication failure never write", async () => {
   assert.doesNotMatch(text, /SENTINEL|password|private secret/);
 });
 
-test("target selection fails closed before production configuration or I/O", async () => {
+test("target selection is explicit and production configuration is required", async () => {
   assert.deepEqual(parseArguments(["--target", "local", "/outside/package.json"]),
     { target: "local", credential: "prompt", mfa: false, filename: "/outside/package.json" });
   assert.equal(parseArguments(["--enroll-keychain"]).mfa, true);
@@ -77,11 +77,9 @@ test("target selection fails closed before production configuration or I/O", asy
   }
   assert.equal(parseArguments(["--target", "production", "/outside/package.json"]).target, "production");
   await assert.rejects(publish({ argv: ["--target", "production", "/outside/package.json"],
-    loadPackage: () => assert.fail("production read"), makeClient: () => assert.fail("production client") }),
-  /PRODUCTION_AUTHORIZATION_NOT_IMPLEMENTED/);
-  await assert.rejects(publish({ argv: ["--target", "production", "--enroll-keychain"],
-    credentialStore: { enroll: () => assert.fail("production enrollment") } }),
-  /PRODUCTION_AUTHORIZATION_NOT_IMPLEMENTED/);
+    env, loadPackage: () => assert.fail("production package read") }), /INPUT_INVALID|production package read/);
+  await assert.rejects(publish({ argv: ["--target", "production", "--enroll-keychain"], env }),
+    /PRODUCTION_KEYCHAIN_ENROLLMENT_DISABLED/);
 });
 
 test("production configuration is target-bound and accepts only public API keys", () => {
@@ -141,6 +139,47 @@ test("production authentication requires MFA and rejects identity mismatches", a
   verifiedId = userId;
   tokenAfterMfa = session({ ...claims, iss: "https://other.supabase.co/auth/v1" });
   await assert.rejects(run(), /PUBLISHER_IDENTITY_MISMATCH/);
+});
+
+test("production publication uses project-scoped credentials and revalidates before registration", async () => {
+  const definition = syntheticMysteryPackage();
+  const packageData = { input: definition, ref: sealMysteryDefinition(definition, EIGHT_ROLE_PROTOTYPE_RULES).ref };
+  const config = productionConfiguration(productionEnv);
+  const now = Math.floor(Date.now() / 1000);
+  const productionSession = session({ iss: config.issuer, aal: "aal2", iat: now,
+    amr: [{ method: "password", timestamp: now }, { method: "totp", timestamp: now }] });
+  const events = [];
+  let bytes;
+  const client = {
+    auth: {
+      signInWithPassword: async () => ({ data: { session: session() } }),
+      getUser: async () => ({ data: { user: { id: userId } } }),
+      signOut: async () => {},
+      mfa: {
+        listFactors: async () => ({ data: { totp: [{ id: "factor", status: "verified" }] } }),
+        challengeAndVerify: async () => ({ data: productionSession }),
+        getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: "aal2" } }),
+      },
+    },
+    storage: { from: () => ({
+      upload: async (_path, value) => { events.push("upload"); bytes = value; return { error: null }; },
+      download: async () => ({ data: new Blob([bytes]), error: null }),
+    }) },
+    rpc: async (_name, args) => { events.push(["register", args.p_approval_reference]); return { data: "published" }; },
+  };
+  await publish({
+    argv: ["--target", "production", "/outside/package.json"], env: productionEnv,
+    input: { isTTY: true }, output: { isTTY: true, write: () => {} },
+    loadPackage: async () => packageData, makeClient: () => client,
+    readPassword: async (_input, _output, label) => label === "Authenticator code" ? "123456" : "password",
+    confirm: async () => true,
+    credentialStore: { read: async (id, context) => {
+      assert.equal(id, userId); assert.equal(context.projectRef, "exampleproject"); return "password";
+    } },
+  });
+  assert.equal(events[0], "upload");
+  assert.equal(events[1][0], "register");
+  assert.match(events[1][1], /^local-attempt:[0-9a-f-]{36}$/);
 });
 
 test("keychain enrollment uses stdin only, refuses unsafe passwords, and verifies readback", async () => {

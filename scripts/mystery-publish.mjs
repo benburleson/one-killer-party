@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import { createInterface } from "node:readline";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { sealMysteryDefinition } from "../src/lib/mystery-content/integrity.ts";
 import { publishMysteryDefinition } from "../src/lib/mystery-content/publication.ts";
@@ -124,7 +125,8 @@ export function localConfiguration(env) {
     MYSTERY_PUBLISHER_USER_ID: userId } = env;
   if (url !== localUrl || !key || /[\r\n]/.test(key) || !email || /[\r\n]/.test(email) ||
       !userId || !uuid.test(userId)) throw new Error("LOCAL_CONFIGURATION_REQUIRED");
-  return { url, key, email, userId: userId.toLowerCase() };
+  return { target: "local", projectRef: "local", url, key, email, userId: userId.toLowerCase(),
+    issuer: `${url}/auth/v1` };
 }
 
 function jwtClaims(token) {
@@ -169,27 +171,33 @@ export function verifyProductionIdentity(session, user, config, now = Date.now()
   const seconds = now / 1000;
   const recent = (timestamp) => Number.isFinite(timestamp) && timestamp <= seconds &&
     timestamp >= seconds - 300;
+  const projectClaim = claims?.project_id ?? claims?.ref;
   return config?.target === "production" && projectRefPattern.test(config.projectRef || "") &&
     config.url === `https://${config.projectRef}.supabase.co` &&
     config.issuer === `${config.url}/auth/v1` && verifyIdentity(session, user, config.userId) &&
-    claims?.iss === config.issuer && claims.aal === "aal2" && recent(claims.iat) &&
+    claims?.iss === config.issuer && (!projectClaim || projectClaim === config.projectRef) &&
+    claims.aal === "aal2" && recent(claims.iat) &&
     Array.isArray(claims.amr) && ["password", "totp"].every((method) =>
       claims.amr.some((entry) => entry?.method === method && recent(entry.timestamp)));
 }
 
-export function approvalFor(ref, userId, now = Date.now()) {
-  const binding = Object.freeze({ target: "local", projectRef: "local", ...ref, ruleSetId: rules.id });
+export function approvalFor(ref, userId, options = {}) {
+  const now = typeof options === "number" ? options : (options.now ?? Date.now());
+  const target = options.target ?? "local";
+  const projectRef = options.projectRef ?? "local";
+  const attemptId = options.attemptId ?? randomUUID();
+  const binding = Object.freeze({ target, projectRef, ...ref, ruleSetId: rules.id });
   const approval = Object.freeze({
     binding,
-    provenance: "owner:local",
+    provenance: `owner:${target}`,
     approvedBy: userId,
-    approvalReference: `sha256:${ref.digestSha256}`,
+    approvalReference: `local-attempt:${attemptId}`,
     approvedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 5 * 60 * 1000).toISOString(),
   });
   return {
-    target: "local",
-    projectRef: "local",
+    target,
+    projectRef,
     artifact: approval,
     async verify(artifact, requested) {
       return artifact === approval && Object.keys(binding).every((key) => binding[key] === requested[key])
@@ -250,6 +258,7 @@ export async function authenticate(client, config, password, requireMfa, input, 
   if (verified.error || !identityValid) {
     throw new Error("PUBLISHER_IDENTITY_MISMATCH");
   }
+  return session;
 }
 
 function confirmPrompt(input, output) {
@@ -265,7 +274,7 @@ function confirmPrompt(input, output) {
   });
 }
 
-export function publicationStore(client, diagnostics) {
+export function publicationStore(client, diagnostics, beforeRegister) {
   return {
     async upload(path, bytes) {
       const { error } = await client.storage.from(bucket).upload(path, bytes, {
@@ -285,6 +294,7 @@ export function publicationStore(client, diagnostics) {
       return new Uint8Array(await data.arrayBuffer());
     },
     async register(ref, path, rulesId, metadata) {
+      if (beforeRegister) await beforeRegister(ref);
       const { data, error } = await client.rpc("publish_mystery_version", {
         p_mystery_id: ref.mysteryId, p_version: ref.version, p_schema_version: ref.schemaVersion,
         p_digest_sha256: ref.digestSha256, p_object_path: path, p_rule_set_id: rulesId,
@@ -306,31 +316,50 @@ export async function publish({ argv, env, input, output, makeClient = createCli
   readPassword = passwordPrompt, confirm = confirmPrompt, credentialStore = keychain,
   loadPackage = readPackage }) {
   const options = parseArguments(argv);
-  if (options.target === "production") throw new Error("PRODUCTION_AUTHORIZATION_NOT_IMPLEMENTED");
+  if (options.target === "production" && options.credential === "enroll") {
+    throw new Error("PRODUCTION_KEYCHAIN_ENROLLMENT_DISABLED");
+  }
   const packageData = options.filename ? await loadPackage(options.filename) : null;
-  const config = localConfiguration(env);
+  const config = options.target === "production" ? productionConfiguration(env) : localConfiguration(env);
   if (!input.isTTY || !output.isTTY) throw new Error("INTERACTIVE_TERMINAL_REQUIRED");
   const client = makeClient(config.url, config.key, {
     auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false },
   });
-  const password = options.credential === "keychain" ? await credentialStore.read(config.userId, options) :
+  const password = options.credential === "keychain" ? await credentialStore.read(config.userId, config) :
     await readPassword(input, output);
   if (!password) throw new Error("CANCELLED");
   try {
-    await authenticate(client, config, password, options.mfa, input, output, readPassword);
+    const session = await authenticate(client, config, password, options.mfa, input, output, readPassword);
     if (options.credential === "enroll") {
-      await credentialStore.enroll(config.userId, password, options);
+      await credentialStore.enroll(config.userId, password, config);
       output.write("Local publisher credential enrolled in Keychain.\n");
       return;
     }
     const { input: definition, ref } = packageData;
-    output.write(`Target: local (${localUrl}), project: local\nPublisher: ${config.userId}\n` +
+    output.write(`Target: ${config.target} (${config.url}), project: ${config.target === "production" ? config.projectRef : "local"}\nPublisher: ${config.userId}\n` +
       `Mystery: ${ref.mysteryId}\nVersion: ${ref.version}\nSchema: ${ref.schemaVersion}\n` +
       `Rule set: ${rules.id}\nSHA-256: ${ref.digestSha256}\n`);
     if (!await confirm(input, output)) throw new Error("CANCELLED");
     const diagnostics = {};
-    const result = await publishMysteryDefinition(definition, rules, approvalFor(ref, config.userId),
-      publicationStore(client, diagnostics));
+    const attemptId = randomUUID();
+    const targetBinding = { target: config.target, projectRef: config.target === "production" ? config.projectRef : "local" };
+    const authorization = approvalFor(ref, config.userId, { ...targetBinding, attemptId });
+    const revalidate = config.target === "production" ? async (currentRef) => {
+      const currentConfig = productionConfiguration(env);
+      if (currentConfig.target !== config.target || currentConfig.projectRef !== config.projectRef ||
+          currentConfig.url !== config.url || currentConfig.key !== config.key) throw new Error("TARGET_CHANGED");
+      const currentPackage = await loadPackage(options.filename);
+      if (currentPackage.ref.digestSha256 !== currentRef.digestSha256 ||
+          currentPackage.ref.mysteryId !== currentRef.mysteryId ||
+          currentPackage.ref.version !== currentRef.version ||
+          currentPackage.ref.schemaVersion !== currentRef.schemaVersion) throw new Error("PACKAGE_CHANGED");
+      const currentUser = await client.auth.getUser(session.access_token);
+      if (currentUser.error || !verifyProductionIdentity(session, currentUser.data?.user, config)) {
+        throw new Error("PUBLISHER_IDENTITY_MISMATCH");
+      }
+    } : undefined;
+    const result = await publishMysteryDefinition(definition, rules, authorization,
+      publicationStore(client, diagnostics, revalidate));
     if (!result.ok) {
       const phase = result.code === "REGISTRATION_FAILED" ? "registration" :
         result.code === "READBACK_FAILED" || result.code === "READBACK_MISMATCH" ? "readback" :

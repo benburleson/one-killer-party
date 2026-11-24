@@ -8,6 +8,37 @@ SET LOCAL search_path TO public, extensions;
 GRANT USAGE ON SCHEMA extensions TO mystery_operator, supabase_auth_admin;
 SELECT no_plan();
 
+SELECT ok(
+  (SELECT pg_catalog.pg_get_userbyid(proowner) = current_user
+   FROM pg_catalog.pg_proc
+   WHERE oid = 'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)'::regprocedure)
+  AND pg_catalog.has_function_privilege(
+    'mystery_operator',
+    'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)',
+    'EXECUTE')
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_proc AS p
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+      COALESCE(p.proacl, pg_catalog.acldefault('f', p.proowner))
+    ) AS acl
+    WHERE p.oid = 'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)'::regprocedure
+      AND acl.privilege_type = 'EXECUTE'
+      AND acl.grantee NOT IN (p.proowner, 'mystery_operator'::regrole)
+  ),
+  'baseline registration ownership and grants are exact'
+);
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'private_mystery.published_versions'::regclass
+      AND confrelid IS NULL
+      AND contype = 'p'
+  ),
+  'baseline registry has its owned primary-key dependency'
+);
+
 CREATE ROLE synthetic_direct_operator_member NOLOGIN;
 GRANT mystery_operator TO synthetic_direct_operator_member;
 SAVEPOINT direct_member_check;
@@ -25,6 +56,49 @@ DROP ROLE synthetic_direct_operator_member;
 
 \ir production-publisher-hook-review.inc
 \ir production-publisher-hook-review.inc
+SELECT ok(
+  (SELECT bool_and(pg_catalog.pg_get_userbyid(c.relowner) = current_user)
+   FROM pg_catalog.pg_class AS c
+   WHERE c.oid IN (
+     'private_mystery.production_publisher_identity'::regclass,
+     'private_mystery.production_publisher_install'::regclass
+   ))
+  AND (SELECT bool_and(pg_catalog.pg_get_userbyid(p.proowner) = current_user)
+       FROM pg_catalog.pg_proc AS p
+       WHERE p.oid IN (
+         'private_mystery.production_publisher_hook(jsonb)'::regprocedure,
+         'private_mystery.production_publisher_authorized()'::regprocedure,
+         'private_mystery.publish_mystery_version(text,text,integer,text,text,text,text,text,text)'::regprocedure,
+         'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)'::regprocedure
+       )),
+  'installed publisher objects have the trusted migration owner'
+);
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'private_mystery.production_publisher_identity'::regclass
+      AND confrelid = 'auth.users'::regclass
+      AND contype = 'f'
+  ),
+  'identity mapping retains its auth.users dependency'
+);
+SELECT ok(
+  NOT pg_catalog.has_table_privilege('anon', 'private_mystery.production_publisher_identity', 'SELECT')
+  AND NOT pg_catalog.has_table_privilege('authenticated', 'private_mystery.production_publisher_identity', 'SELECT')
+  AND NOT pg_catalog.has_table_privilege('service_role', 'private_mystery.production_publisher_identity', 'SELECT')
+  AND NOT pg_catalog.has_table_privilege('mystery_operator', 'private_mystery.production_publisher_identity', 'SELECT')
+  AND NOT pg_catalog.has_table_privilege('supabase_auth_admin', 'private_mystery.production_publisher_identity', 'SELECT')
+  AND pg_catalog.has_function_privilege('supabase_auth_admin', 'private_mystery.production_publisher_hook(jsonb)', 'EXECUTE')
+  AND NOT pg_catalog.has_function_privilege('authenticated', 'private_mystery.production_publisher_hook(jsonb)', 'EXECUTE')
+  AND pg_catalog.has_function_privilege('mystery_operator', 'private_mystery.production_publisher_authorized()', 'EXECUTE')
+  AND NOT pg_catalog.has_function_privilege('supabase_auth_admin', 'private_mystery.production_publisher_authorized()', 'EXECUTE')
+  AND pg_catalog.has_function_privilege('mystery_operator',
+    'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)', 'EXECUTE')
+  AND NOT pg_catalog.has_function_privilege('authenticated',
+    'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)', 'EXECUTE'),
+  'installed publisher grants are exact at the trust boundaries'
+);
 CREATE ROLE synthetic_operator_bridge NOLOGIN;
 CREATE ROLE synthetic_indirect_operator_member NOLOGIN;
 GRANT mystery_operator TO synthetic_operator_bridge;
@@ -217,6 +291,21 @@ SELECT ok(
     'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)', 'EXECUTE')
   AND pg_catalog.to_regprocedure('private_mystery.publish_mystery_version(text,text,integer,text,text,text,text,text,text)') IS NULL,
   'reviewed rollback restores the original registration entry point'
+);
+SELECT ok(
+  (SELECT pg_catalog.pg_get_userbyid(proowner) = current_user
+   FROM pg_catalog.pg_proc
+   WHERE oid = 'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)'::regprocedure)
+  AND pg_catalog.to_regclass('private_mystery.production_publisher_identity') IS NULL
+  AND pg_catalog.to_regclass('private_mystery.production_publisher_install') IS NULL
+  AND pg_catalog.to_regprocedure('private_mystery.production_publisher_hook(jsonb)') IS NULL
+  AND pg_catalog.to_regprocedure('private_mystery.production_publisher_authorized()') IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies
+    WHERE schemaname = 'storage' AND tablename = 'objects'
+      AND policyname = 'production_publisher_restrict_objects'
+  ),
+  'rollback removes publisher dependencies and preserves trusted ownership'
 );
 CREATE TEMP TABLE publisher_test_finish ON COMMIT DROP AS SELECT * FROM finish();
 TABLE publisher_test_finish;

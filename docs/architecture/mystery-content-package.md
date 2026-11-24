@@ -2,8 +2,10 @@
 
 **Status: M2.1a contract and M2.1b persistence are implemented.** The owner
 reports the package migration applied to Production; this is not independently
-verified. No Production publisher, operator credential, publication,
-rehearsal or gameplay is authorized by this contract. The pure domain files
+verified. The approved publication approval is an MFA-authenticated owner
+session plus exact interactive confirmation; no independent approval service or
+second human is required. Production publisher provisioning, publication,
+rehearsal and gameplay remain disabled by this contract. The pure domain files
 remain isolated; the trusted loader is not wired to application routes, server
 components, host operations or gameplay.
 This document describes the code in [`src/lib/mystery-content/`](../../src/lib/mystery-content/). The
@@ -319,10 +321,11 @@ legacy CLI refuses a non-loopback URL, requires
 `--target local`, `--confirm-approval` and non-secret metadata, accepts only
 the named `eight-role-prototype-v1` rules, and logs only status, identity and
 digest. It does not report file paths, payloads, provider errors or
-credentials. Local `--approved-by` and `--approval-reference` values are
-provenance labels, not proof of an independent approval; the local adapter
-exists only for disposable synthetic work. A production verifier must
-independently authenticate and authorize an approval before bytes are uploaded.
+credentials. Local `--approved-by` and `--approval-reference` values are provenance labels,
+not proof of owner authentication; the local adapter exists only for
+disposable synthetic work. Production approval must instead use the
+MFA-authenticated owner session and exact interactive confirmation bound to the
+publication target.
 Example (the variables must be set from the disposable local stack's status in
 a private shell environment; never copy status output into a PR or log):
 
@@ -340,18 +343,15 @@ The publication sequence is upload exact sealed canonical bytes → independentl
 and call `loadVerifiedMysteryDefinition` → register the immutable identity.
 Identical retries re-read and verify existing bytes and return
 `already_published`; a differing digest for an existing version is rejected.
-The reusable publisher requires an injected verifier to return a fresh
-approval bound to the explicit environment, exact project reference, package
-ID/version/schema, canonical digest and rule-set ID. The core rejects
-mismatched, expired, future-dated or over-15-minute approvals before upload.
-A production verifier is not
-implemented. When selected, it must verify a tamper-resistant owner-approved
-artifact or authenticated owner confirmation, revocation and expiry, and
-idempotent verification only for the same binding. The owner alone approves;
-no second human is required. MFA assurance remains a credential-design gate.
-The publisher rechecks that approval immediately before
-registry insertion; record its stable approval reference and audit
-identity/time.
+The reusable publisher requires the MFA-authenticated owner session and exact
+interactive confirmation bound to the explicit environment, exact project
+reference, package ID/version/schema, canonical digest and rule-set ID. The
+core rejects mismatched, expired or future-dated session/confirmation data
+before upload. The publisher rechecks the session and confirmation immediately
+before registry insertion; record its stable approval reference and audit
+identity/time. No independent approval service is required. This leaves the
+owner account/session, MFA device and trusted Supabase administrators as
+explicit limits: compromise of those controls can authorize publication.
 Metadata-only approval is not accepted as production authorization.
 Because object storage and Postgres are not one transaction, a failed readback
 or registration can leave an unregistered orphan. Such an object is not
@@ -391,10 +391,11 @@ reconciliation, incidents, release rollback, owner-operated read-only
 preflight and separately approved synthetic rehearsal gates are documented in
 [production operations](../production-operations.md#private-mystery-package-storage-and-publishing-m21bm21c).
 The migration application status there is owner-attested, not independently
-verified. No production issuer, approval verifier, publisher target, or
-rehearsal is approved by this package contract. A local Auth hook experiment
-does not establish that the managed Production Auth, Storage and RPC path
-works or authorize its use.
+verified. No production publisher target is provisioned or rehearsed by this package
+contract. The approved MFA session and exact-confirmation path does not
+establish that the managed Production Auth, Storage and RPC path works or
+authorize its use until owner provisioning and the synthetic rehearsal are
+complete.
 
 Back up Postgres registry state and private Storage objects together and
 restore them to the same point-in-time set. After restore, verify each registry
@@ -413,9 +414,9 @@ This is owner attestation, not independent verification. Before any future
 production publication, an owner must separately approve: (1) exact-target
 read-only preflight and migration/grant verification; (2) private bucket,
 restrictive browser policies, registry/RPC grants and immutable triggers; (3)
-a separate operator credential issuance/rotation/revocation design and audit
-trail; (4) encrypted backup, retention and full restore rehearsal; and (5) an
-explicitly approved synthetic publication rehearsal. Apply no migration
+the MFA owner identity/session mapping, credential custody, revocation and
+audit trail; (4) encrypted backup, retention and full restore rehearsal; and
+(5) an explicitly approved synthetic publication rehearsal. Apply no migration
 without its own approval. Verify migration history, object digest/retention,
 deployment SHA and production smoke test separately. None is implied by these
 local tests.
