@@ -81,8 +81,8 @@ export function approvalFor(ref, userId, now = Date.now()) {
 function passwordPrompt(input, output) {
   return new Promise((resolve) => {
     let password = "";
-    output.write("Publisher password (not echoed): ");
     input.setRawMode(true);
+    output.write("Publisher password (not echoed): ");
     input.resume();
     const finish = (value) => {
       input.removeListener("data", onData);
@@ -197,6 +197,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     .catch((error) => {
       const code = error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : "PUBLICATION_FAILED";
       console.error(code);
+      if (code === "EXPAND_TILDE_IN_SHELL") {
+        console.error("Use an absolute path, or leave ~ unquoted so your shell expands it.");
+      }
       process.exitCode = 1;
     });
 }

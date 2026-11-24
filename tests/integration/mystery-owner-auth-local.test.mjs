@@ -26,11 +26,21 @@ test("Auth hook publisher, orphan retry, and private storage boundaries", async 
     cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
   }));
   assert.equal(status.API_URL, "http://127.0.0.1:54321");
+  sql(`DO $$ BEGIN
+    IF NOT pg_catalog.pg_has_role('authenticator', 'mystery_operator', 'MEMBER')
+      OR NOT pg_catalog.has_function_privilege('supabase_auth_admin', 'private_mystery.local_mystery_publisher_hook(jsonb)', 'EXECUTE')
+      OR pg_catalog.has_function_privilege('authenticated', 'private_mystery.local_mystery_publisher_hook(jsonb)', 'EXECUTE')
+      OR pg_catalog.has_table_privilege('authenticated', 'private_mystery.local_publisher_identity', 'SELECT')
+    THEN RAISE EXCEPTION 'hook privileges invalid'; END IF;
+  END $$;`);
   const admin = createClient(status.API_URL, status.SERVICE_ROLE_KEY, options);
   const suffix = randomBytes(8).toString("hex");
   const password = randomBytes(24).toString("base64url");
   const email = `publisher-${suffix}@example.invalid`;
   const otherEmail = `other-${suffix}@example.invalid`;
+  const otherBucket = `synthetic-other-${suffix}`;
+  assert.equal((await admin.storage.createBucket(otherBucket, { public: false })).error, null);
+  t.after(async () => { await admin.storage.deleteBucket(otherBucket); });
   const owner = await admin.auth.admin.createUser({ email, password, email_confirm: true });
   const other = await admin.auth.admin.createUser({ email: otherEmail, password, email_confirm: true,
     user_metadata: { role: "mystery_operator" } });
@@ -38,7 +48,7 @@ test("Auth hook publisher, orphan retry, and private storage boundaries", async 
   const id = owner.data.user.id;
   assert.match(id, /^[0-9a-f-]{36}$/);
   t.after(async () => {
-    sql("DELETE FROM private_mystery.local_publisher_identity;");
+    sql(`DELETE FROM private_mystery.local_publisher_identity WHERE user_id = '${id}';`);
     await admin.auth.admin.deleteUser(id);
     await admin.auth.admin.deleteUser(other.data.user.id);
   });
@@ -89,6 +99,8 @@ test("Auth hook publisher, orphan retry, and private storage boundaries", async 
   assert.ok((await operator.storage.from(bucket).upload(path, new Uint8Array([1]), { upsert: true })).error);
   assert.ok((await operator.storage.from(bucket).remove([path])).error);
   assert.ok((await operator.storage.listBuckets()).error);
+  const otherList = await operator.storage.from(otherBucket).list();
+  assert.ok(otherList.error || otherList.data.length === 0);
   for (const client of [createClient(status.API_URL, status.ANON_KEY, options), ordinary]) {
     const listed = await client.storage.from(bucket).list(sealed.ref.mysteryId);
     assert.equal(listed.error, null);

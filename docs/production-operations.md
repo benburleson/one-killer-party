@@ -327,9 +327,16 @@ mystery content. Never commit the local config change, credentials or package.
 This is a local Auth session with a custom role claim, not a Supabase CLI
 Management API PAT. A PAT or anon key alone cannot confer the publishing role.
 Installation or successful sign-in does not prove Storage **and** the
-registration RPC work. In particular, if the local experiment encounters an
-RPC failure, its cause and end-to-end feasibility remain unknown until
-investigated; do not report success or extrapolate to Production.
+registration RPC work. The issue reports an initial `REGISTRATION_FAILED`
+after upload on 2026-11-24, followed by a successful retry; the root cause
+remains unknown. This implementation's local integration verified an orphan
+retry and a conflicting publication, but did not reproduce that initial
+failure. Do not extrapolate these local results to Production.
+
+`npm run test:integration:owner` requires a disposable local Supabase stack
+with the local hook installed and active. It creates and deletes disposable
+Auth users and the local publisher mapping; the singleton mapping must be
+available before the test. Never run it against Production.
 
 For rotation or cleanup, stop publishing, delete the mapped row locally
 (`DELETE FROM private_mystery.local_publisher_identity;`), disable the hook

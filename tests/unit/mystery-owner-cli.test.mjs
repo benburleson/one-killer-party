@@ -60,6 +60,9 @@ test("cancel, EOF and authentication failure never write", async (t) => {
     makeClient: () => client, readPassword: async () => "password", confirm: async () => false };
   await assert.rejects(publish(options), /CANCELLED/);
   await assert.rejects(publish({ ...options, readPassword: async () => null }), /CANCELLED/);
+  client.auth.getUser = async () => ({ data: { user: { id: "wrong" } }, error: null });
+  await assert.rejects(publish(options), /PUBLISHER_IDENTITY_MISMATCH/);
+  client.auth.getUser = async () => ({ data: { user: { id: userId } }, error: null });
   client.auth.signInWithPassword = async () => ({ error: { message: "private secret" } });
   await assert.rejects(publish(options), /AUTHENTICATION_FAILED/);
   assert.equal(writes, 0);
