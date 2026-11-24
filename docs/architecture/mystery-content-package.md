@@ -327,9 +327,10 @@ ID/version/schema, canonical digest and rule-set ID. The core rejects
 mismatched, expired, future-dated or over-15-minute approvals before upload.
 A production verifier is not
 implemented. When selected, it must verify a tamper-resistant owner-approved
-artifact, distinct approver and operator identities (or an owner-approved
-equivalent), MFA, revocation and expiry, and idempotent verification only for
-the same binding. The publisher rechecks that approval immediately before
+artifact or authenticated owner confirmation, revocation and expiry, and
+idempotent verification only for the same binding. The owner alone approves;
+no second human is required. MFA assurance remains a credential-design gate.
+The publisher rechecks that approval immediately before
 registry insertion; record its stable approval reference and audit
 identity/time.
 Metadata-only approval is not accepted as production authorization.
