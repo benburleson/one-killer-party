@@ -280,10 +280,11 @@ callable only by `service_role` and the operator. Storage credentials never
 produce signed URLs.
 
 `mystery_operator` is a non-login Postgres role granted only package-bucket
-object `SELECT`/`INSERT` and publication RPC execution. The local CLI derives a
-short-lived JWT for that role from the **local** JWT secret; it does not use or
-receive the runtime `SUPABASE_SERVICE_ROLE_KEY`. Never generalize the local
-signing-secret pattern to Production. The runtime server loader uses the app's
+object `SELECT`/`INSERT` and publication RPC execution. The legacy integration
+CLI derives a short-lived JWT for that role from the **local** JWT secret; the
+separate local Auth experiment described below does not require that secret.
+Neither uses the runtime `SUPABASE_SERVICE_ROLE_KEY`. Never generalize the
+local signing-secret pattern to Production. The runtime server loader uses the app's
 existing service-role client for the exact-reference RPC and private object
 download. Supabase service-role credentials still bypass RLS and have broad
 Storage API powers; application code must not use them outside the server-only
@@ -294,9 +295,27 @@ privileged database administrators remain trusted.
 
 ### Local operator publishing and trust boundary
 
-Only a disposable local Supabase target is implemented. Keep the synthetic or
-private JSON input **outside this repository** and expose local credentials
-only to the operator process. The CLI refuses a non-loopback URL, requires
+The new owner-style experiment uses `npm run mystery:publish -- /absolute/path`
+against disposable local Supabase only. It takes `SUPABASE_URL` set to
+`http://127.0.0.1:54321`, `SUPABASE_ANON_KEY`,
+`MYSTERY_PUBLISHER_EMAIL` and `MYSTERY_PUBLISHER_USER_ID`; the local Auth
+password and publication confirmation are entered interactively on a TTY,
+not persisted as secrets. The locally installed, disabled-by-default
+`private_mystery.local_mystery_publisher_hook` maps one explicitly
+provisioned disposable Auth user to `mystery_operator` without adding a public
+RPC.
+The anon key alone grants no publisher access. This is a local experiment,
+not independently verified owner approval or a Production credential. Its
+setup, revocation and limitations are in
+[production operations](../production-operations.md#local-auth-publisher-experiment).
+The command and hook must be present in the checkout before those instructions
+can be used; documenting them does not itself install or verify them.
+
+The existing `scripts/publish-mystery.mjs` and
+`npm run publish:mystery:local` remain the **legacy integration harness**,
+not the new Auth flow. Keep the synthetic or private JSON input **outside this
+repository** and expose local credentials only to the operator process. This
+legacy CLI refuses a non-loopback URL, requires
 `--target local`, `--confirm-approval` and non-secret metadata, accepts only
 the named `eight-role-prototype-v1` rules, and logs only status, identity and
 digest. It does not report file paths, payloads, provider errors or
@@ -317,7 +336,7 @@ npm run publish:mystery:local -- \
   --confirm-approval
 ```
 
-The sequence is upload exact sealed canonical bytes → independently download
+The publication sequence is upload exact sealed canonical bytes → independently download
 and call `loadVerifiedMysteryDefinition` → register the immutable identity.
 Identical retries re-read and verify existing bytes and return
 `already_published`; a differing digest for an existing version is rejected.
@@ -373,7 +392,9 @@ preflight and separately approved synthetic rehearsal gates are documented in
 [production operations](../production-operations.md#private-mystery-package-storage-and-publishing-m21bm21c).
 The migration application status there is owner-attested, not independently
 verified. No production issuer, approval verifier, publisher target, or
-rehearsal is approved by this package contract.
+rehearsal is approved by this package contract. A local Auth hook experiment
+does not establish that the managed Production Auth, Storage and RPC path
+works or authorize its use.
 
 Back up Postgres registry state and private Storage objects together and
 restore them to the same point-in-time set. After restore, verify each registry

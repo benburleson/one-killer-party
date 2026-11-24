@@ -117,8 +117,8 @@ bucket listing/object access. Storage triggers reject update/delete through
 the REST API even for `service_role`, and registry rows are immutable. However,
 `service_role` bypasses RLS and can directly read Storage objects, including
 unregistered orphans, and can upload orphan objects. A database owner or
-superuser can disable triggers or alter the schema. The local CLI derives a
-short-lived custom-role JWT from the local project JWT secret. This is **not**
+superuser can disable triggers or alter the schema. The legacy integration CLI
+derives a short-lived custom-role JWT from the local project JWT secret. This is **not**
 a production operator credential design: the project signing secret is too
 broad to treat as a separately scoped production publisher credential.
 
@@ -135,9 +135,9 @@ reference in the audit record. This policy does not enable Production.
 
 **Recommendation: no-go for a Production publisher until a genuinely scoped
 credential and owner authentication are demonstrated.** The existing local
-CLI is a disposable test harness, not the desired owner workflow. No
-standalone credential, Keychain setup, authenticated confirmation or
-`npm run mystery:publish` command is implemented. Do not put a project signing
+CLI is a disposable test harness, not a Production owner workflow. A separate
+local Auth experiment is described below; it does not supply a Production
+credential or independently verified Production approval. Do not put a project signing
 key in Keychain and call it a scoped credential: possession permits minting
 other roles. A bearer token stored there is only as restricted, short-lived
 and revocable as its actual issuer and Supabase trust configuration.
@@ -158,19 +158,14 @@ These links could not be rechecked live for M2.1d because network access was
 unavailable; the Management API distinction and owner-reported CLI test are
 not a proof of a supported role-token bridge.
 
-The implemented local-only command and its required local environment are in
-the [package contract](architecture/mystery-content-package.md#local-operator-publishing-and-trust-boundary).
+The legacy local-only command and its environment are in the
+[package contract](architecture/mystery-content-package.md#local-operator-publishing-and-trust-boundary).
 It takes explicit flags and uses the disposable project's JWT secret; it is
-not suitable for real packages or Production. The intended eventual command,
-**illustrative only**, is:
-
-```sh
-npm run mystery:publish -- /private/file.json
-```
-
-In a follow-up, it must display the verified environment/project, owner
-identity, package ID/version/schema, rule set and digest, then require typing
-`publish`; cancellation or failed verification must cause no writes. The
+not suitable for real packages or Production. The separate local Auth
+experiment below is not a Production implementation. A future Production
+workflow must display the verified environment/project, owner identity,
+package ID/version/schema, rule set and digest and require explicit
+confirmation; cancellation or failed verification must cause no writes. The
 owner must first decide between the following alternatives, after current
 official documentation and a disposable end-to-end proof are available:
 
@@ -245,12 +240,114 @@ credential-design gate to be decided and verified by the owner. The publisher
 rechecks the same approval immediately before registry insertion, after upload
 and readback. Its immutable approval ID/reference and identity/time evidence
 must be recorded in the registry/audit system. A bare `--approved-by` or
-`--approval-reference` is never authorization. Only an explicit local
-confirmation adapter exists; it is a mock/local workflow, not an independently
+`--approval-reference` is never authorization. The local confirmation adapters are experiments, not independently
 verifiable production approval.
 No Production publishing command is available until an owner selects and
-approves the issuer and approval provider. The CLI has no implicit target and
-rejects `production`.
+approves the issuer and approval provider. Neither local CLI is a Production
+publishing target.
+
+### Local Auth publisher experiment
+
+This procedure is **only for a disposable local Supabase stack and synthetic
+content**. It describes the companion `mystery:publish` command and
+`scripts/local-publisher-hook.sql`; check that both are present before use.
+Documentation alone neither installs them nor demonstrates that they work.
+Do not use linked or remote databases, Production credentials, or real
+mystery content. Never commit the local config change, credentials or package.
+
+1. Start the disposable stack with `npx supabase start`. Verify that the API,
+   database and Studio are local on ports 54321, 54322 and 54323 respectively;
+   keep forwarded ports private. Obtain the local anon key and database
+   credentials from the local stack's status privately; do not copy status
+   output, passwords, tokens or keys into logs, issues or shell history.
+2. Connect `psql` directly to the **local** database and install the
+   `private_mystery.local_mystery_publisher_hook` and private mapping table,
+   after inspecting the script and confirming the target. Keeping the hook in
+   the private schema avoids adding a public RPC. Use an interactive password
+   prompt, not a password in the URI or command line:
+
+   ```sh
+   psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -W \
+     -v ON_ERROR_STOP=1 -f scripts/local-publisher-hook.sql
+   ```
+
+   The SQL installation does not activate the hook. Do not run it against a
+   remote database or add it as a migration. If installation fails, inspect the
+   local state before retrying; do not assume the script is idempotent.
+3. In local Studio at `http://127.0.0.1:54323`, create a disposable Auth user
+   with an email and password. Record its Auth UUID privately. In an
+   interactive `psql` session using the same explicitly local connection,
+   insert that UUID into the private mapping, replacing the placeholder with
+   the local user's UUID:
+
+   ```sql
+   INSERT INTO private_mystery.local_publisher_identity (user_id)
+   VALUES ('<LOCAL-AUTH-USER-UUID>'::uuid);
+   ```
+
+   This is a singleton mapping: remove the old mapping before assigning a
+   replacement. Do not map a real account. The hook remains disabled until
+   explicitly enabled in the next step.
+4. In the local, **uncommitted** `supabase/config.toml`, set:
+
+   ```toml
+   [auth.hook.custom_access_token]
+   enabled = true
+   uri = "pg-functions://postgres/private_mystery/local_mystery_publisher_hook"
+   ```
+
+   Restart the disposable local stack (`npx supabase stop` followed by
+   `npx supabase start`) to apply the Auth configuration. Do not use
+   `--no-backup` if retaining this disposable local state for the experiment.
+   Never apply this configuration to Production.
+5. In a private interactive shell, enter the local anon key, disposable
+   user's email and its UUID at the prompts rather than putting values in
+   shell history. Keep the synthetic package outside the repository:
+
+   ```sh
+   export SUPABASE_URL=http://127.0.0.1:54321
+   read -r -s -p "Local anon key: " SUPABASE_ANON_KEY; printf '\n'
+   read -r -p "Disposable user email: " MYSTERY_PUBLISHER_EMAIL
+   read -r -p "Disposable user UUID: " MYSTERY_PUBLISHER_USER_ID
+   export SUPABASE_ANON_KEY MYSTERY_PUBLISHER_EMAIL MYSTERY_PUBLISHER_USER_ID
+   npm run mystery:publish -- /absolute/path/to/synthetic-package.json
+   ```
+
+   Use a TTY for the password and confirmation prompts; do not put the password
+   in an environment variable or command line. The flow is intended not to
+   persist secrets. Review the displayed target and package details before
+   typing `PUBLISH` to confirm; cancel on any mismatch. Do not record raw
+   output containing private content, tokens or credentials. Unset the shell
+   variables afterward:
+
+   ```sh
+   unset SUPABASE_URL SUPABASE_ANON_KEY MYSTERY_PUBLISHER_EMAIL MYSTERY_PUBLISHER_USER_ID
+   ```
+
+This is a local Auth session with a custom role claim, not a Supabase CLI
+Management API PAT. A PAT or anon key alone cannot confer the publishing role.
+Installation or successful sign-in does not prove Storage **and** the
+registration RPC work. In particular, if the local experiment encounters an
+RPC failure, its cause and end-to-end feasibility remain unknown until
+investigated; do not report success or extrapolate to Production.
+
+For rotation or cleanup, stop publishing, delete the mapped row locally
+(`DELETE FROM private_mystery.local_publisher_identity;`), disable the hook
+in the uncommitted config and restart the local stack. Delete the disposable
+Auth user in Studio and remove local credentials from the shell; restore the
+config file without committing it. An already issued JWT remains usable until
+expiry even after the mapping is deleted or the hook is disabled. To rotate,
+provision a new disposable user and mapping and repeat the local activation
+steps; never reuse this experiment as a Production credential.
+
+On a partial publish, preserve evidence and check the exact local registry
+identity and object digest. Upload and registration are not atomic: an object
+may be an unregistered orphan. Retry only the identical package bytes; an
+identical registered version is idempotent, while different bytes for the same
+version conflict. Do not automatically delete objects or weaken immutable
+triggers; use the separately reviewed reconciliation procedure below if
+cleanup is necessary. A disposable reset loses local state and is not a
+Production recovery procedure.
 
 ### Owner-operated read-only Production preflight
 
