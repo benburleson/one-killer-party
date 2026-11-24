@@ -246,10 +246,10 @@ The candidate configuration validator expects an explicitly selected
 dedicated `MYSTERY_PUBLISHER_EMAIL` and `MYSTERY_PUBLISHER_USER_ID`. These
 are configuration inputs, not authority to publish. The candidate Keychain
 label is `one-killer-party.mystery-publisher.production.<project-ref>` and
-the account is the UUID. No Production values are checked in. Production enrollment remains disabled;
-`--target production --keychain` is the supported routine path once the
-owner-approved mapping exists, while `--enroll-keychain` is rejected for the
-Production target. The CLI still requires the separate provisioning,
+the account is the UUID. No Production values are checked in.
+`--target production --enroll-keychain` implements one-time credential
+enrollment, and `--target production --keychain` retrieves that credential
+for routine publishing. The CLI still requires the separate provisioning,
 preflight and rehearsal gates below before any live use.
 
 Two independent gates remain:
@@ -319,28 +319,40 @@ in place until all old tokens have expired or are otherwise demonstrably
 ineffective. Removing those guards requires a separately reviewed database
 rollback and verification; simply disabling the hook is not a safe rollback.
 
-#### macOS Keychain experiment
+#### macOS Keychain enrollment and use
 
-The Keychain integration can currently be exercised only with the disposable
-local publisher above; Production targeting is blocked in code pending the
-approved identity-backed verifier, not enabled by setting environment values.
-Install dependencies with `npm ci`, configure the disposable local user and
-environment as below, and enroll a verified TOTP factor for that user. Then
-run these commands in an interactive macOS terminal:
+Enrollment is implemented for both targets. Native Keychain execution and
+access controls must still be verified on a real Mac with a disposable
+credential before any Production credential is handled. Code merge does not
+configure Supabase or authorize these live operations: Production
+provisioning, enrollment and rehearsal remain separately owner-approved under
+Issue #55. No Production environment was accessed to validate this code.
+
+Install dependencies with `npm ci`. For local verification, configure the
+disposable user and environment as below and enroll a verified TOTP factor
+using local Auth. Run these commands in an interactive macOS terminal:
 
 ```sh
 npm run mystery:publish -- --target local --enroll-keychain
 npm run mystery:publish -- --target local --keychain /absolute/path/to/synthetic-package.json
 ```
 
-The first command prompts without echo for the password and a TOTP code,
-verifies them against local Auth, and stores the password under the Keychain
+The first command displays the destination URL/ref, publisher email/UUID and
+Keychain service before prompting without echo for the password and TOTP.
+Cancel with Ctrl-C/Ctrl-D or EOF if any destination detail is wrong. It
+verifies the identity and MFA against Auth before storing the password under the Keychain
 service `one-killer-party.mystery-publisher.local`, with the user UUID as the
 account. The second retrieves it, signs in afresh, prompts for TOTP and requires
-`PUBLISH` for the displayed package. Passwords accepted by this experiment
+`PUBLISH` for the displayed package. Passwords accepted by this implementation
 must use only ASCII letters, digits, `_` or `-`; choose a long random one.
+This restriction prevents quoting/command-parser ambiguity in the
+`security -i` stdin protocol; it is not an Auth password-policy change.
+Spaces, quotes, shell metacharacters, backslashes, newlines and non-ASCII
+characters are deliberately rejected for Keychain enrollment, not escaped.
 macOS may prompt to unlock the Keychain or permit access; deny unexpected
 requests. No password is passed in process arguments or written to a file.
+Only the narrowly scoped publisher login password is stored, not its JWT or
+refresh token. Auth sessions are not persisted by this CLI.
 Keep the Keychain locked when not in use and never store a service-role key,
 signing secret, Management API PAT, or database password in this entry.
 
@@ -351,13 +363,69 @@ set in the shell:
 security delete-generic-password -s one-killer-party.mystery-publisher.local -a "$MYSTERY_PUBLISHER_USER_ID"
 ```
 
+After the separate owner-approved provisioning and native-Mac acceptance gates,
+configure the five nonsecret Production inputs listed above in a private
+operator environment, not git, CI or Vercel. Then run:
+
+```sh
+npm run mystery:publish -- --target production --enroll-keychain
+```
+
+Verify the full project ref/URL and dedicated UUID/email before supplying the
+password. This command performs Auth password sign-in, fresh TOTP verification,
+`aal2` assurance and verified user/issuer/role/audience/freshness checks; only
+then does it store the password under the project-specific service. It never
+loads a mystery, uploads an object or calls a registry RPC. Success prints
+only an enrollment confirmation. Subsequent publishing still requires fresh
+TOTP and the exact package approval:
+
+```sh
+npm run mystery:publish -- --target production --keychain /absolute/path/to/package.json
+```
+
+To remove the Production entry (no password in the command):
+
+```sh
+security delete-generic-password \
+  -s "one-killer-party.mystery-publisher.production.${MYSTERY_PRODUCTION_PROJECT_REF}" \
+  -a "$MYSTERY_PUBLISHER_USER_ID"
+```
+
 For rotation, stop publishing, remove the old mapping and revoke sessions,
 rotate the dedicated user's password and TOTP using the approved Auth
 procedure, delete the old Keychain entry, then enroll the new credential after
-the identity mapping has been restored. On device compromise, immediately
+the identity mapping has been safely restored (observe the token-expiry gate
+above). Use the Production removal command above followed by
+`npm run mystery:publish -- --target production --enroll-keychain`; duplicate
+entries are not silently replaced. Do not place the new password in a command,
+environment variable or plaintext file. On device compromise, immediately
 revoke the mapping and sessions from a trusted device, rotate the credentials
 and review access and orphaned objects; do not assume Keychain deletion
 invalidates tokens already issued.
+
+**Mandatory real-macOS acceptance checklist (not exercised by Linux CI):**
+
+- Use only a disposable local Auth user with verified TOTP and a long synthetic
+  password. Confirm target/service/account display precedes the hidden prompt.
+- Exercise the local enrollment command; verify neither password nor TOTP is
+  echoed, recorded in shell history or present in process arguments. Inspect
+  process arguments locally without recording the stdin or copying credentials.
+- Verify the item in Keychain Access has the expected service/account and
+  appropriately restricted access controls. Inspect unlock/access prompts on
+  retrieval, allow only an expected request, and do not select “Always Allow”
+  or permit all applications without separate security review.
+- Test a locked Keychain, denied access, duplicate entry and removal, then
+  reenroll/retrieve successfully. Do not print retrieved passwords with
+  `security find-generic-password -w`. A failed readback can leave a newly
+  created item; inspect/remove it before retrying rather than assuming atomicity.
+- Check that spaces, shell metacharacters, quotes, backslashes and non-ASCII
+  passwords fail safely without a new item; verify the supported ASCII password
+  round-trips exactly. Do not relax the restriction without reviewed native
+  parser/escaping tests.
+- Test wrong identity/project, invalid TOTP, cancellation and EOF; no item
+  should be created and no Storage/RPC publication should occur. Record only
+  safe pass/fail results. Real Auth-issued MFA through Storage/RPC remains a
+  separate disposable-project acceptance gate before Production activation.
 
 ### Local Auth publisher experiment
 

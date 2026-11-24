@@ -314,14 +314,17 @@ export function publicationStore(client, diagnostics, beforeRegister) {
 
 export async function publish({ argv, env, input, output, makeClient = createClient,
   readPassword = passwordPrompt, confirm = confirmPrompt, credentialStore = keychain,
-  loadPackage = readPackage }) {
+  loadPackage = readPackage, platform = process.platform }) {
   const options = parseArguments(argv);
-  if (options.target === "production" && options.credential === "enroll") {
-    throw new Error("PRODUCTION_KEYCHAIN_ENROLLMENT_DISABLED");
-  }
   const packageData = options.filename ? await loadPackage(options.filename) : null;
   const config = options.target === "production" ? productionConfiguration(env) : localConfiguration(env);
   if (!input.isTTY || !output.isTTY) throw new Error("INTERACTIVE_TERMINAL_REQUIRED");
+  if (options.credential === "enroll") {
+    if (platform !== "darwin") throw new Error("KEYCHAIN_MACOS_REQUIRED");
+    output.write(`Keychain enrollment target: ${config.target} (${config.url}), project: ${config.projectRef}\n` +
+      `Publisher: ${config.userId} (${config.email})\n` +
+      `Keychain service: ${keychainService}.${config.target}${config.target === "production" ? `.${config.projectRef}` : ""}\n`);
+  }
   const client = makeClient(config.url, config.key, {
     auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false },
   });
@@ -331,8 +334,12 @@ export async function publish({ argv, env, input, output, makeClient = createCli
   try {
     const session = await authenticate(client, config, password, options.mfa, input, output, readPassword);
     if (options.credential === "enroll") {
-      await credentialStore.enroll(config.userId, password, config);
-      output.write("Local publisher credential enrolled in Keychain.\n");
+      try {
+        await credentialStore.enroll(config.userId, password, config);
+      } catch {
+        throw new Error("KEYCHAIN_FAILED");
+      }
+      output.write(`${config.target === "production" ? "Production" : "Local"} publisher credential enrolled in Keychain.\n`);
       return;
     }
     const { input: definition, ref } = packageData;

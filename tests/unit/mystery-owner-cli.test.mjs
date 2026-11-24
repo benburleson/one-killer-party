@@ -79,7 +79,7 @@ test("target selection is explicit and production configuration is required", as
   await assert.rejects(publish({ argv: ["--target", "production", "/outside/package.json"],
     env, loadPackage: () => assert.fail("production package read") }), /INPUT_INVALID|production package read/);
   await assert.rejects(publish({ argv: ["--target", "production", "--enroll-keychain"], env }),
-    /PRODUCTION_KEYCHAIN_ENROLLMENT_DISABLED/);
+    /PRODUCTION_CONFIGURATION_REQUIRED/);
 });
 
 test("production configuration is target-bound and accepts only public API keys", () => {
@@ -240,9 +240,9 @@ test("enrollment requires MFA and identity before saving and never prints creden
       getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: "aal2" } }),
     },
   } };
-  const options = { argv: ["--enroll-keychain"], env, input: { isTTY: true },
+  const options = { argv: ["--enroll-keychain"], env, platform: "darwin", input: { isTTY: true },
     output: { isTTY: true, write: (s) => { text += s; } }, makeClient: () => client,
-    readPassword: async (_input, _output, label) => label ? "123456" : "fake-password",
+    readPassword: async (_input, _output, label) => label ? "987654" : "fake-password",
     credentialStore: { enroll: async (id, password) => { assert.equal(id, userId); assert.equal(password, "fake-password"); saved++; } } };
   client.auth.mfa.challengeAndVerify = async () => ({ error: { message: "secret" } });
   await assert.rejects(publish(options), /MFA_FAILED/);
@@ -250,7 +250,148 @@ test("enrollment requires MFA and identity before saving and never prints creden
   client.auth.mfa.challengeAndVerify = async () => ({ data: session() });
   await publish(options);
   assert.equal(saved, 1);
-  assert.doesNotMatch(text, /fake-password|123456|secret/);
+  assert.doesNotMatch(text, /fake-password|987654|secret/);
+});
+
+function productionEnrollment() {
+  const config = productionConfiguration(productionEnv);
+  const now = Math.floor(Date.now() / 1000);
+  const claims = { iss: config.issuer, aal: "aal2", iat: now,
+    amr: [{ method: "password", timestamp: now }, { method: "totp", timestamp: now }] };
+  const events = [];
+  let text = "";
+  const client = { auth: {
+    signInWithPassword: async ({ email, password }) => {
+      events.push("login");
+      assert.equal(email, config.email);
+      assert.equal(password, "fake-password_123");
+      return { data: { session: session({ aal: "aal1" }) } };
+    },
+    getUser: async () => { events.push("identity"); return { data: { user: { id: userId } } }; },
+    signOut: async () => { events.push("signout"); },
+    mfa: {
+      listFactors: async () => ({ data: { totp: [{ id: "factor", status: "verified" }] } }),
+      challengeAndVerify: async ({ code }) => {
+        events.push("mfa");
+        assert.equal(code, "654321");
+        return { data: session(claims) };
+      },
+      getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: "aal2" } }),
+    },
+  },
+  storage: { from: () => assert.fail("enrollment must not access Storage") },
+  rpc: () => assert.fail("enrollment must not register") };
+  const options = {
+    argv: ["--target", "production", "--enroll-keychain"], env: { ...productionEnv },
+    platform: "darwin", input: { isTTY: true },
+    output: { isTTY: true, write: (s) => { text += s; } },
+    makeClient: (url, key) => {
+      events.push("client");
+      assert.equal(url, config.url);
+      assert.equal(key, config.key);
+      return client;
+    },
+    readPassword: async (_input, _output, label) => {
+      assert.match(text, /https:\/\/exampleproject\.supabase\.co/);
+      assert.match(text, new RegExp(userId));
+      events.push(label ? "code" : "password");
+      return label ? "654321" : "fake-password_123";
+    },
+    loadPackage: () => assert.fail("enrollment must not load a package"),
+    confirm: () => assert.fail("enrollment must not request publication approval"),
+    credentialStore: { enroll: async (id, password, context) => {
+      assert.equal(id, userId);
+      assert.equal(password, "fake-password_123");
+      assert.deepEqual(context, config);
+      events.push("saved");
+    } },
+  };
+  return { options, client, claims, events, text: () => text };
+}
+
+test("Production enrollment displays destination, verifies MFA identity, and only then saves", async () => {
+  const fixture = productionEnrollment();
+  const keychainCalls = [];
+  const keychain = createKeychain({ platform: "darwin", run: async (args, stdin, capture) => {
+    keychainCalls.push({ args, stdin, capture });
+    return capture ? "fake-password_123\n" : "";
+  } });
+  const save = fixture.options.credentialStore.enroll;
+  fixture.options.credentialStore.enroll = async (...args) => {
+    await keychain.enroll(...args);
+    await save(...args);
+  };
+  await publish(fixture.options);
+  assert.deepEqual(fixture.events, ["client", "password", "login", "code", "mfa", "identity", "saved", "signout"]);
+  assert.match(fixture.text(), /one-killer-party\.mystery-publisher\.production\.exampleproject/);
+  assert.match(fixture.text(), /owner@example\.invalid/);
+  assert.match(fixture.text(), /Production publisher credential enrolled/);
+  assert.doesNotMatch(fixture.text(), /fake-password_123|654321|access_token/);
+  assert.deepEqual(keychainCalls[0].args, ["-i"]);
+  assert.match(keychainCalls[0].stdin, /one-killer-party\.mystery-publisher\.production\.exampleproject/);
+  assert.match(keychainCalls[0].stdin, /fake-password_123/);
+  assert.ok(keychainCalls.every(({ args }) => !args.join(" ").includes("fake-password_123")));
+});
+
+test("Production enrollment refuses authentication, MFA, identity and project failures without saving", async () => {
+  const cases = [
+    [({ client }) => { client.auth.signInWithPassword = async () => ({ error: { message: "secret-provider-error" } }); },
+      "AUTHENTICATION_FAILED"],
+    [({ client }) => { client.auth.mfa.challengeAndVerify = async () => ({ error: { message: "secret-provider-error" } }); },
+      "MFA_FAILED"],
+    [({ client }) => { client.auth.mfa.getAuthenticatorAssuranceLevel = async () => ({ data: { currentLevel: "aal1" } }); },
+      "MFA_FAILED"],
+    [({ client }) => { client.auth.getUser = async () => ({ data: { user: { id: "wrong" } } }); },
+      "PUBLISHER_IDENTITY_MISMATCH"],
+    [({ client, claims }) => { client.auth.mfa.challengeAndVerify = async () =>
+      ({ data: session({ ...claims, iss: "https://other.supabase.co/auth/v1" }) }); },
+    "PUBLISHER_IDENTITY_MISMATCH"],
+    [({ client, claims }) => { client.auth.mfa.challengeAndVerify = async () =>
+      ({ data: session({ ...claims, role: "authenticated" }) }); }, "PUBLISHER_IDENTITY_MISMATCH"],
+    [({ client, claims }) => { client.auth.mfa.challengeAndVerify = async () =>
+      ({ data: session({ ...claims, aud: "anon" }) }); }, "PUBLISHER_IDENTITY_MISMATCH"],
+    [({ client, claims }) => { client.auth.mfa.challengeAndVerify = async () =>
+      ({ data: session({ ...claims, iat: 1 }) }); }, "PUBLISHER_IDENTITY_MISMATCH"],
+  ];
+  for (const [change, code] of cases) {
+    const fixture = productionEnrollment();
+    change(fixture);
+    await assert.rejects(publish(fixture.options), { message: code });
+    assert.ok(!fixture.events.includes("saved"));
+    assert.doesNotMatch(fixture.text(), /secret-provider-error|fake-password_123|654321/);
+  }
+});
+
+test("Production enrollment rejects cancellation, EOF, unsupported platform and non-TTY before storing", async () => {
+  for (const change of [
+    (options) => { options.readPassword = async () => null; },
+    (options) => { options.readPassword = async (_input, _output, label) => label ? null : "fake-password_123"; },
+    (options) => { options.readPassword = async () => ""; },
+  ]) {
+    const fixture = productionEnrollment();
+    change(fixture.options);
+    await assert.rejects(publish(fixture.options), /CANCELLED/);
+    assert.ok(!fixture.events.includes("saved"));
+  }
+  for (const [change, code] of [
+    [(options) => { options.platform = "linux"; }, "KEYCHAIN_MACOS_REQUIRED"],
+    [(options) => { options.input.isTTY = false; }, "INTERACTIVE_TERMINAL_REQUIRED"],
+    [(options) => { options.output.isTTY = false; }, "INTERACTIVE_TERMINAL_REQUIRED"],
+    [(options) => { options.env.MYSTERY_PRODUCTION_SUPABASE_URL = "https://other.supabase.co"; }, "PRODUCTION_CONFIGURATION_REQUIRED"],
+  ]) {
+    const fixture = productionEnrollment();
+    change(fixture.options);
+    await assert.rejects(publish(fixture.options), { message: code });
+    assert.deepEqual(fixture.events, []);
+  }
+});
+
+test("Production Keychain errors are redacted and the Auth session is cleaned up", async () => {
+  const fixture = productionEnrollment();
+  fixture.options.credentialStore.enroll = async () => { throw new Error("fake-password_123 secret-keychain-error"); };
+  await assert.rejects(publish(fixture.options), { message: "KEYCHAIN_FAILED" });
+  assert.equal(fixture.events.at(-1), "signout");
+  assert.doesNotMatch(fixture.text(), /fake-password_123|secret-keychain-error|credential enrolled/);
 });
 
 test("Keychain publication authenticates freshly before confirmation and writes nothing on cancellation", async () => {
