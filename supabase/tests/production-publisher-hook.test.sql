@@ -33,7 +33,6 @@ SELECT ok(
     SELECT 1
     FROM pg_catalog.pg_constraint
     WHERE conrelid = 'private_mystery.published_versions'::regclass
-      AND confrelid IS NULL
       AND contype = 'p'
   ),
   'baseline registry has its owned primary-key dependency'
