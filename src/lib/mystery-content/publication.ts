@@ -8,6 +8,34 @@ export type PublicationMetadata = Readonly<{
   approvalReference: string;
 }>;
 
+export type PublicationTarget = "local" | "production";
+
+export type PublicationBinding = Readonly<{
+  target: PublicationTarget;
+  projectRef: string;
+  mysteryId: string;
+  version: string;
+  schemaVersion: number;
+  digestSha256: string;
+  ruleSetId: string;
+}>;
+
+export type VerifiedPublicationApproval = PublicationMetadata & Readonly<{
+  binding: PublicationBinding;
+  approvedAt: string;
+  expiresAt: string;
+}>;
+
+export type PublicationAuthorization = Readonly<{
+  target: PublicationTarget;
+  projectRef: string;
+  artifact: unknown;
+  verify(
+    artifact: unknown,
+    binding: PublicationBinding,
+  ): Promise<VerifiedPublicationApproval | null>;
+}>;
+
 export type PublicationStore = Readonly<{
   upload(path: string, bytes: Uint8Array): Promise<void>;
   download(path: string): Promise<Uint8Array>;
@@ -31,8 +59,57 @@ export type PublicationResult =
 const SAFE_PROVENANCE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const SAFE_APPROVER = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,79}$/;
 const SAFE_APPROVAL_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._#:/-]{0,119}$/;
+const SAFE_PROJECT_REF = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
+const MAX_APPROVAL_LIFETIME_MS = 15 * 60 * 1000;
 const equalBytes = (left: Uint8Array, right: Uint8Array) =>
   left.length === right.length && left.every((byte, index) => byte === right[index]);
+
+function validApproval(
+  approval: VerifiedPublicationApproval | null,
+  binding: PublicationBinding,
+  now: number,
+): approval is VerifiedPublicationApproval {
+  if (!approval || typeof approval !== "object" || !approval.binding ||
+      typeof approval.binding !== "object" ||
+      typeof approval.approvedAt !== "string" || typeof approval.expiresAt !== "string" ||
+      typeof approval.provenance !== "string" || typeof approval.approvedBy !== "string" ||
+      typeof approval.approvalReference !== "string" ||
+      Object.keys(binding).some((key) =>
+        approval.binding[key as keyof PublicationBinding] !== binding[key as keyof PublicationBinding])) {
+    return false;
+  }
+  const approvedAt = Date.parse(approval.approvedAt);
+  const expiresAt = Date.parse(approval.expiresAt);
+  return SAFE_PROVENANCE.test(approval.provenance) &&
+    SAFE_APPROVER.test(approval.approvedBy) &&
+    SAFE_APPROVAL_REFERENCE.test(approval.approvalReference) &&
+    Number.isFinite(approvedAt) && Number.isFinite(expiresAt) &&
+    approvedAt <= now && expiresAt > now &&
+    expiresAt > approvedAt && expiresAt - approvedAt <= MAX_APPROVAL_LIFETIME_MS;
+}
+
+function safelyValidApproval(
+  approval: VerifiedPublicationApproval | null,
+  binding: PublicationBinding,
+  now: number,
+): approval is VerifiedPublicationApproval {
+  try {
+    return validApproval(approval, binding, now);
+  } catch {
+    return false;
+  }
+}
+
+function sameApproval(
+  left: VerifiedPublicationApproval,
+  right: VerifiedPublicationApproval,
+): boolean {
+  return left.provenance === right.provenance &&
+    left.approvedBy === right.approvedBy &&
+    left.approvalReference === right.approvalReference &&
+    left.approvedAt === right.approvedAt &&
+    left.expiresAt === right.expiresAt;
+}
 
 export function privateMysteryObjectPath(ref: PublishedVersionRef): string {
   return `${ref.mysteryId}/${ref.version}/${ref.digestSha256}.json`;
@@ -41,18 +118,39 @@ export function privateMysteryObjectPath(ref: PublishedVersionRef): string {
 export async function publishMysteryDefinition(
   input: unknown,
   rules: PackageRuleSet,
-  metadata: PublicationMetadata,
+  authorization: PublicationAuthorization,
   store: PublicationStore,
 ): Promise<PublicationResult> {
-  if (!metadata || !SAFE_PROVENANCE.test(metadata.provenance) ||
-      !SAFE_APPROVER.test(metadata.approvedBy) ||
-      !SAFE_APPROVAL_REFERENCE.test(metadata.approvalReference)) {
-    return { ok: false, code: "INVALID_APPROVAL" };
-  }
   if (rules.id !== "eight-role-prototype-v1") return { ok: false, code: "INVALID_PACKAGE" };
 
   const sealed = sealMysteryDefinition(input, rules);
   if (!sealed.ok) return { ok: false, code: "INVALID_PACKAGE" };
+
+  if (!authorization || !["local", "production"].includes(authorization.target) ||
+      typeof authorization.projectRef !== "string" || !SAFE_PROJECT_REF.test(authorization.projectRef) ||
+      typeof authorization.verify !== "function") {
+    return { ok: false, code: "INVALID_APPROVAL" };
+  }
+  const binding: PublicationBinding = {
+    target: authorization.target,
+    projectRef: authorization.projectRef,
+    ...sealed.ref,
+    ruleSetId: rules.id,
+  };
+  let approval: VerifiedPublicationApproval | null;
+  try {
+    approval = await authorization.verify(authorization.artifact, Object.freeze(binding));
+  } catch {
+    return { ok: false, code: "INVALID_APPROVAL" };
+  }
+  if (!safelyValidApproval(approval, binding, Date.now())) {
+    return { ok: false, code: "INVALID_APPROVAL" };
+  }
+  const metadata: PublicationMetadata = {
+    provenance: approval.provenance,
+    approvedBy: approval.approvedBy,
+    approvalReference: approval.approvalReference,
+  };
   const path = privateMysteryObjectPath(sealed.ref);
 
   try {
@@ -76,6 +174,16 @@ export async function publishMysteryDefinition(
   const verified = loadVerifiedMysteryDefinition(bytes, sealed.ref, rules);
   if (!verified.ok || !equalBytes(bytes, sealed.bytes)) {
     return { ok: false, code: "READBACK_MISMATCH" };
+  }
+  let refreshedApproval: VerifiedPublicationApproval | null;
+  try {
+    refreshedApproval = await authorization.verify(authorization.artifact, Object.freeze(binding));
+  } catch {
+    return { ok: false, code: "INVALID_APPROVAL" };
+  }
+  if (!safelyValidApproval(refreshedApproval, binding, Date.now()) ||
+      !sameApproval(approval, refreshedApproval)) {
+    return { ok: false, code: "INVALID_APPROVAL" };
   }
 
   try {

@@ -88,11 +88,28 @@ async function main() {
     auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: "Bearer " + operatorToken(jwtSecret) } },
   });
-  const result = await publishMysteryDefinition(input, EIGHT_ROLE_PROTOTYPE_RULES, {
+  const approvalMetadata = {
     provenance: args.get("--provenance"),
     approvedBy: args.get("--approved-by"),
     approvalReference: args.get("--approval-reference"),
-  }, {
+  };
+  const approvalCreatedAt = new Date();
+  const approvalExpiresAt = new Date(approvalCreatedAt.getTime() + 5 * 60 * 1000);
+  const authorization = {
+    target: "local",
+    projectRef: "local",
+    artifact: approvalMetadata,
+    async verify(artifact, binding) {
+      if (binding.target !== "local" || artifact !== approvalMetadata) return null;
+      return {
+        ...approvalMetadata,
+        binding,
+        approvedAt: approvalCreatedAt.toISOString(),
+        expiresAt: approvalExpiresAt.toISOString(),
+      };
+    },
+  };
+  const result = await publishMysteryDefinition(input, EIGHT_ROLE_PROTOTYPE_RULES, authorization, {
     async upload(path, bytes) {
       const { error } = await client.storage.from("private-mystery-packages").upload(path, bytes, {
         contentType: "application/json",

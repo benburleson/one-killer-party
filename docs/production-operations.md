@@ -24,8 +24,8 @@ check establishes none of the later ones.
 | `20261121030000_lobby_persistence.sql`, `20261121040000_host_party_commands.sql` | Applied | Owner attestation; the owner also reported both versions in the remote migration history |
 | `20261122000000_guest_membership.sql`, `20261122010000_public_character_assignment.sql` | Applied | Owner attestation (issue #41, 2026-11-23) |
 | Guest join and recovery, public role assignment, lobby synchronization | Deployed and smoke-tested in Production | Owner attestation (issue #41, 2026-11-23) |
-| `20261123000000_browser_role_lockdown_and_join_pin.sql` | **Not applied** | Needs the approval procedure below; apply before deploying the app version that depends on it |
-| `20261123010000_private_mystery_packages.sql` | **Not applied; local-only for M2.1b** | No production bucket, schema, publication or deployment was requested or performed |
+| `20261123000000_browser_role_lockdown_and_join_pin.sql` | Applied | Owner attestation for M2.1c (2026-11-23); not independently verified |
+| `20261123010000_private_mystery_packages.sql` | Applied | Owner attestation for M2.1c (2026-11-23); not independently verified; no publication or rehearsal reported |
 
 **Owner attestation is not independent verification.** This repository holds
 no migration-history output, deployment SHA, date or smoke-test record for the
@@ -98,10 +98,13 @@ For every production change:
 
 **Never** let Copilot, PR CI, or a test workflow migrate/reset Production. Never run a remote/linked database reset, migrations from unreviewed agent code, or automated integration tests against Production. Local tests use `npx supabase db reset --no-seed` and `npx supabase test db` against disposable Docker Supabase only.
 
-## Private mystery package storage (M2.1b)
+## Private mystery package storage and publishing (M2.1b/M2.1c)
 
-M2.1b adds a **local-only** private Storage bucket, restricted published
-registry, operator publication CLI and server-only exact-reference loader.
+M2.1b implements private Storage, a restricted published registry, a
+local-only operator CLI and a server-only exact-reference loader. The owner
+reports both current migrations as applied to Production (owner attestation
+only); no dashboard, migration-history, deployment or object inspection was
+performed for this issue. Production publishing is still disabled.
 The existing lobby placeholder remains `blackwood-affair /
 first-playtest-placeholder-v1`; it has no private package and no party pin or
 game-start behavior changed. The new migration and synthetic integration test
@@ -119,33 +122,224 @@ short-lived custom-role JWT from the local project JWT secret. This is **not**
 a production operator credential design: the project signing secret is too
 broad to treat as a separately scoped production publisher credential.
 
-Before any production use, obtain separate human approvals for all of the
-following gates; none is approved by this issue or its local tests:
+### Credential and approval decision (proposed; owner approval required)
 
-1. **Target and dry run:** confirm the exact Supabase production project,
-   inspect current migration history and run a reviewed dry run. Verify the
-   expected migration order, including the still-unapplied
-   `20261123000000_browser_role_lockdown_and_join_pin.sql`.
-2. **Schema and Storage review:** review the fixed bucket name, nonpublic
-   settings, browser-deny policies, `mystery_operator` role, registry fields,
-   RPC execute grants, immutable triggers and administrator/superuser limits.
-3. **Credential separation:** approve a dedicated operator authorization,
-   issuance, rotation, revocation and audit strategy that does not distribute
-   the runtime service-role key or reuse a broad project JWT signing secret.
-   The production CLI must target only that approved credential boundary.
-4. **Backup and retention:** rehearse consistent Postgres registry and Storage
-   object backups/restores; verify restored objects against every registered
-   digest and retain versions pinned by parties. Define an owner-audited
-   procedure for orphan cleanup; ordinary operator/runtime API roles cannot
-   delete immutable package objects.
-5. **Explicit apply and publication approval:** obtain approval for the exact
-   target and migration, apply the reviewed schema before deploying dependent
-   application code, then separately approve any package's editorial
-   provenance/publication. Validator success is not editorial approval.
-6. **Independent verification:** after an owner-authorized operation, verify
-   migration history, deployment SHA, object digest/retention and production
-   smoke test separately. Record the evidence and rollback plan; a green CI
-   run, merged PR or owner attestation is not independent verification.
+No Production issuer, credential, CLI target, or approval provider is
+configured. The selected Supabase database grants are narrow, but a token must
+still be signed by a key that Supabase trusts and carry the exact
+`role: mystery_operator` claim. PostgREST extracts the role claim and assumes
+that PostgreSQL role only when the JWT signature is trusted and the role is
+granted to `authenticator`; Storage independently validates the bearer JWT and
+uses the role for its RLS checks. A random OIDC token, anon key, or new API key
+does not acquire this role. See Supabase's [JWT guide](https://supabase.com/docs/guides/auth/jwts),
+[signing keys guide](https://supabase.com/docs/guides/auth/signing-keys),
+[third-party Auth overview](https://supabase.com/docs/guides/auth/third-party/overview),
+and [PostgREST JWT role claims](https://postgrest.org/en/stable/references/auth.html).
+The official docs source was reviewed; live docs access was unavailable from
+the development environment.
+
+| Candidate | Validation and role mapping | Tradeoffs / decision |
+| --- | --- | --- |
+| Owner-controlled issuer with a dedicated asymmetric Supabase-trusted signing key | Only if the selected key/import mechanism is supported for externally minted tokens: Supabase's signing-key/JWKS trust must validate signatures; issuer creates a short-lived JWT with `role=mystery_operator`, expected audience/issuer and subject. PostgREST applies the role only if `authenticator` has membership; Storage validates the same project token independently. | **Preferred for review, not activated or proven.** Private key stays in an owner-controlled issuer/HSM; operators authenticate with MFA and receive only a short-lived token. Key configuration, issuer infrastructure, policy that can sign only this role, audit storage, rotation and revocation require owner-selected design and may incur cost. A compromised trusted signing key can potentially mint other roles, including privileged roles; role restriction in issuer policy is essential, not a Supabase-enforced restriction. Require a disposable proof against both Storage and RPC before any production decision. |
+| Supported third-party OIDC integration | Supabase documents supported third-party JWT verification through the provider's asymmetric OIDC/JWKS keys. Data API role resolution still depends on a valid PostgREST role claim and granted database role. Do not assume the managed integration maps an external operator identity to `mystery_operator`; verify the exact provider claim mapping and Storage behavior in a disposable project first. | Not selected. Requires owner-configured Auth integration, claim mapping proof, issuer key-rotation/revocation timing review, MFA assurance and possible third-party-user billing. Direct production config changes are prohibited here. |
+| Operator-only execution environment calling Supabase | The environment does not create Supabase authority by itself; it must receive a Supabase-trusted short-lived JWT or use an owner-controlled issuer. Its API call still passes through Storage/PostgREST role validation and the SQL grants. | Useful as a controlled front end, but not a credential solution alone. Must not contain `service_role` or the project-wide JWT signing secret. Adds identity, logging, runtime and recovery costs; owner approval required. |
+
+Supabase supports asymmetric Auth signing keys and external OIDC providers, but
+the repository has no production Supabase signing-key configuration or issuer
+proof. A disposable local project's legacy `SUPABASE_JWT_SECRET` proof does not
+prove that a separately scoped production key will be accepted by both managed
+Storage and PostgREST. The preferred option above therefore remains a design
+proposal; do not provision it or change Production Auth settings in this issue.
+Never give publisher operators `SUPABASE_SERVICE_ROLE_KEY` or the broad
+project JWT signing secret, and do not substitute a long-lived database
+credential. `service_role` still bypasses RLS and has broad Storage access;
+database owners/superusers can change grants, disable triggers or alter rows.
+No mechanism here claims isolation from those privileged credentials.
+
+| Identity | Intended access | Important limit |
+| --- | --- | --- |
+| `anon` / `authenticated` browser roles | No package bucket listing/read/write; no registry access or publication RPC | Verify both Storage policies and RPC/table grants; route absence alone is insufficient |
+| Runtime `service_role` | Exact-reference registry lookup and private object read through the server-only loader | Bypasses RLS and retains broad Storage API powers; can read unregistered orphans and must remain server-only |
+| `mystery_operator` | Package object `SELECT`/`INSERT` and `publish_mystery_version` only | Cannot directly read registry or use ordinary API deletion; no production identity issuer exists |
+| Proposed issuer / publisher operator | Issue/receive a short-lived token scoped to `mystery_operator`; invoke Storage and registration only | Not implemented. Compromise of a signing key capable of signing arbitrary role claims may escalate beyond intended grants |
+| Database owner / superuser | Administrative recovery and schema maintenance | Can bypass RLS, alter registry or disable triggers; trusted administrator boundary remains |
+
+The reusable publisher now requires an approval verifier to return a fresh,
+at-most-15-minute authorization bound to environment, exact Supabase project
+reference, package ID/version/schema, canonical digest and exact rule set. The
+production verifier must verify an owner-approved signed artifact or
+identity-backed approval, two distinct
+approver/operator identities (or an owner-approved equivalent), MFA, revocation,
+expiry and idempotent verification only for the same binding. The publisher
+rechecks the same approval immediately before registry insertion, after upload
+and readback. Its immutable approval ID/reference and identity/time evidence
+must be recorded in the registry/audit system. A bare `--approved-by` or
+`--approval-reference` is never authorization. Only an explicit local
+confirmation adapter exists; it is a mock/local workflow, not an independently
+verifiable production approval.
+No Production publishing command is available until an owner selects and
+approves the issuer and approval provider. The CLI has no implicit target and
+rejects `production`.
+
+### Owner-operated read-only Production preflight
+
+Only an authorized owner may perform this inspection after this PR is reviewed.
+It is **read-only**: do not run `db push`, alter Auth or Storage settings, issue
+tokens, upload/delete objects, or publish. Record redacted links and result
+timestamps; do not paste secret values, package bytes or object locators in
+GitHub.
+
+1. Select the exact Supabase project ID from the owner-controlled console and
+   independently confirm its Production label and expected Vercel project;
+   never infer target from a shell default or URL alone.
+2. Inspect remote migration history for both `20261123000000` and
+   `20261123010000`; compare against reviewed migration files. Record this as
+   independent verification (or report mismatch), separately from the
+   owner-reported application status above.
+3. Inspect the package bucket's ID, private flag, MIME/size limits and
+   browser-deny Storage policies. Inspect `mystery_operator` membership/grants,
+   table RLS/force-RLS, immutable triggers, the exact `publish_mystery_version`
+   and `get_published_mystery` execute grants, and confirm no browser role can
+   list/read package bytes. Use read-only catalog/dashboard inspection only.
+   If using the SQL editor, run only read-only checks like the following and
+   keep raw result rows in the owner's restricted audit system:
+
+   ```sql
+   SELECT version
+   FROM supabase_migrations.schema_migrations
+   WHERE version IN ('20261123000000', '20261123010000')
+   ORDER BY version;
+
+   SELECT id, public, file_size_limit, allowed_mime_types
+   FROM storage.buckets
+   WHERE id = 'private-mystery-packages';
+
+   SELECT policyname, roles, cmd, qual, with_check
+   FROM pg_policies
+   WHERE schemaname = 'storage'
+     AND tablename IN ('objects', 'buckets')
+     AND policyname LIKE 'private_mystery%';
+
+   SELECT rolname, rolcanlogin,
+          pg_catalog.pg_has_role('authenticator', rolname, 'MEMBER') AS authenticator_member,
+          pg_catalog.has_table_privilege(rolname, 'private_mystery.published_versions', 'SELECT') AS registry_select
+   FROM pg_roles
+   WHERE rolname IN ('mystery_operator', 'anon', 'authenticated', 'service_role');
+
+   SELECT pg_catalog.has_function_privilege(
+            role_name,
+            'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)',
+            'EXECUTE'
+          ) AS can_publish,
+          role_name
+   FROM unnest(ARRAY['mystery_operator', 'anon', 'authenticated', 'service_role'])
+     AS principals(role_name);
+
+   SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, t.tgname, t.tgenabled
+   FROM pg_class AS c
+   LEFT JOIN pg_trigger AS t ON t.tgrelid = c.oid AND NOT t.tgisinternal
+   WHERE c.oid IN (
+     'private_mystery.published_versions'::regclass,
+     'storage.objects'::regclass
+   )
+   ORDER BY c.relname, t.tgname;
+   ```
+
+4. Confirm service-role credentials are confined to the server runtime; no
+   publisher, GitHub Actions, Copilot, PR preview or public client receives
+   them. Record only yes/no and credential owner, not values. Confirm no
+   Production issuer/approval artifact is configured until its separate
+   decision is approved.
+5. Inspect current deployment SHA and verify it does not expose package data
+   through browser routes, RSC/client payloads, notifications or public
+   Storage. A trusted loader is not player authorization; M2.2 must separately
+   revalidate fresh party pin, member and assignment before an allowlisted
+   dossier projection.
+6. Review existing encrypted Postgres and object-backup inventory, access
+   separation, retention and latest restore evidence. A database-only backup
+   is insufficient. Stop and request owner decision if any item is unknown.
+
+### Backup, retention, recovery and orphan controls
+
+Production backup must capture a consistent registry snapshot **and** every
+private bucket object. Pause publisher use for the snapshot window; save an
+encrypted Postgres custom-format dump/snapshot and a separately encrypted
+object archive with a protected manifest containing each object path and
+SHA-256. Encrypt before offsite transfer using owner-approved KMS-managed keys;
+limit restore-key access to named recovery operators and keep it separate from
+the publisher identity. Never store bytes, manifests, keys or raw logs in
+GitHub artifacts. The owner must approve a concrete retention schedule and
+restore location before activation. Proposed minimum policy for review: daily
+backups retained 35 days plus monthly copies retained 12 months; preserve
+objects indefinitely while any party pin references them, then retain until an
+audited content-retirement decision.
+
+The local integration test exports exact registry rows from the local lookup
+RPC and matching bytes from local private Storage, then loads two versions
+through an isolated restore adapter. It confirms missing or tampered snapshot
+bytes fail closed. This is a useful application-level consistency test, not a
+physical database restore, object-store restore or KMS/offsite test; no full
+backup restoration has been demonstrated. Keep the distinction explicit in
+handoff evidence.
+
+For restore, use an isolated disposable project with the reviewed migration
+version and compatible Storage schema; restore the registry and object bytes
+from the same snapshot generation, then cross-check every registry identity,
+schema, rule-set, path and digest against exact object bytes with
+`loadVerifiedMysteryDefinition`. Also enumerate backup objects absent from the
+registry as orphan candidates. Do not point the app at a partial restore. Test
+both versions of the synthetic fixture independently and confirm a missing or
+changed object returns only `CONTENT_UNAVAILABLE`. Local unit/integration
+checks cover these integrity/fail-closed cases; a full Postgres-plus-Storage
+backup restore rehearsal is still a human production gate and has not been
+performed.
+
+Never automatically clean up package objects. An authorized reconciliation
+operator exports a redacted candidate list, rechecks each canonical path
+against the registry and all party pins immediately before action, obtains
+separate human approval, pauses concurrent publication for the affected
+identity, then records candidate digest, decision, actor, time and result in
+the owner audit system. The normal triggers intentionally prohibit deletes,
+including by service_role. If an orphan must be removed, use a separately
+reviewed, narrowly privileged maintenance window with a reversible backup;
+do not weaken triggers or add a general-purpose deletion RPC. Preserve every
+registered or referenced object across deployments and rollback.
+
+### Incident and release rollback
+
+- **Lost publisher token/key:** stop publishing, revoke/retire the issuer key
+  under the owner-approved key lifecycle, wait for the applicable verification
+  cache/expiry window, review issuer audit for unexpected issuance, and issue a
+  replacement only after owner approval. Do not rotate the project-wide legacy
+  secret as a convenience.
+- **Registry compromise:** suspend the issuer, preserve audit evidence, compare
+  registry and object manifests to the last known encrypted backup, and have a
+  database owner assess rollback/repair. Immutability triggers are not a
+  defense against that owner.
+- **Missing/tampered object or partial publication:** fail closed; do not serve
+  another version or "latest". Preserve evidence, reconcile exact registry and
+  digest, then restore the same immutable object from verified backup or issue
+  a corrected new version and separately approve any party migration decision.
+  An uploaded but unregistered object is an orphan; identical retries are safe,
+  changed bytes/version conflicts are not.
+- **Application release rollback:** restore the prior deployment while keeping
+  every registered object and party-pinned version. Confirm the old code
+  understands those schema/rule versions. Never delete or repin a party as
+  part of application rollback.
+
+### Separately approved synthetic Production rehearsal
+
+This is a future checklist only, not authorized or executed by this issue. It
+requires reviewed code, an independently verified read-only preflight, owner
+selection of issuer and approval policy, approved encrypted backups with a
+successful isolated restore, and a separate written authorization naming the
+exact synthetic package identity/digest/rule set/Production project. After
+those gates, an owner-operated two-person session may verify identity and
+short expiry, review the safe summary, publish only a non-story synthetic
+sentinel package, independently verify registration/object digest and
+browser/unauthenticated denial, capture redacted audit evidence, and execute
+an approved recovery/rollback plan. No real mystery package or editorial
+content belongs in this rehearsal. This issue performs none of these steps.
 
 M2.2 must separately implement fresh party/member/assignment authorization
 and an allowlisted own-dossier projection. Possessing or successfully loading

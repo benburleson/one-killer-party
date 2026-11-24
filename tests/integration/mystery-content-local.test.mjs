@@ -31,12 +31,12 @@ function localStatus() {
   return status;
 }
 
-function operatorToken(secret) {
+function operatorToken(secret, { expiresAt } = {}) {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const unsigned = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({
     aud: "authenticated",
-    exp: now + 300,
+    exp: expiresAt ?? now + 300,
     iat: now,
     iss: "supabase",
     role: "mystery_operator",
@@ -128,6 +128,52 @@ test("local operator publication, exact loading, retries and browser storage den
   assert.equal((await loadTrustedPublishedMystery(firstRef, store)).ok, true);
   assert.equal((await loadTrustedPublishedMystery(secondRef, store)).ok, true);
 
+  const backup = { registry: new Map(), objects: new Map() };
+  for (const ref of [firstRef, secondRef]) {
+    const { data: registryRows, error: registryError } = await runtime.rpc("get_published_mystery", {
+      p_mystery_id: ref.mysteryId,
+      p_version: ref.version,
+      p_schema_version: ref.schemaVersion,
+      p_digest_sha256: ref.digestSha256,
+    });
+    assert.equal(registryError, null);
+    assert.equal(registryRows.length, 1);
+    const row = registryRows[0];
+    const { data: object, error: objectError } = await runtime.storage.from(bucket).download(row.object_path);
+    assert.equal(objectError, null);
+    backup.registry.set(`${ref.mysteryId}/${ref.version}`, row);
+    backup.objects.set(row.object_path, new Uint8Array(await object.arrayBuffer()));
+  }
+  const restoredStore = {
+    async lookup(ref) {
+      const row = backup.registry.get(`${ref.mysteryId}/${ref.version}`);
+      return row ? [row] : [];
+    },
+    async download(path) {
+      const bytes = backup.objects.get(path);
+      if (!bytes) throw new Error("unavailable");
+      return new Uint8Array(bytes);
+    },
+  };
+  assert.equal((await loadTrustedPublishedMystery(firstRef, restoredStore)).ok, true);
+  assert.equal((await loadTrustedPublishedMystery(secondRef, restoredStore)).ok, true);
+  const firstPath = backup.registry.get("synthetic-local/local-v1").object_path;
+  const savedFirstBytes = backup.objects.get(firstPath);
+  backup.objects.delete(firstPath);
+  assert.deepEqual(await loadTrustedPublishedMystery(firstRef, restoredStore), {
+    ok: false,
+    code: "CONTENT_UNAVAILABLE",
+  });
+  backup.objects.set(firstPath, savedFirstBytes);
+  const secondPath = backup.registry.get("synthetic-local/local-v2").object_path;
+  const savedSecondBytes = backup.objects.get(secondPath);
+  backup.objects.set(secondPath, new Uint8Array([0x7b, 0x7d]));
+  assert.deepEqual(await loadTrustedPublishedMystery(secondRef, restoredStore), {
+    ok: false,
+    code: "CONTENT_UNAVAILABLE",
+  });
+  backup.objects.set(secondPath, savedSecondBytes);
+
   const changedPackage = { ...packageOne, title: "Another synthetic title" };
   const changedPath = join(temp, "changed-package.json");
   await writeFile(changedPath, JSON.stringify(changedPackage), { mode: 0o600 });
@@ -149,6 +195,21 @@ test("local operator publication, exact loading, retries and browser storage den
   });
   const operatorBuckets = await operator.storage.listBuckets();
   assert.ok(operatorBuckets.error);
+  for (const [index, token] of [
+    operatorToken(status.JWT_SECRET, { expiresAt: Math.floor(Date.now() / 1000) - 60 }),
+    operatorToken("untrusted-local-test-secret"),
+  ].entries()) {
+    const untrustedOperator = createClient(status.API_URL, status.ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: "Bearer " + token } },
+    });
+    const denied = await untrustedOperator.storage.from(bucket).upload(
+      `synthetic-local/unauthorized/attempt-${index}.json`,
+      new Uint8Array([1]),
+      { contentType: "application/json" },
+    );
+    assert.ok(denied.error);
+  }
   const overwrite = await operator.storage.from(bucket).upload(path, new Uint8Array([1, 2, 3]), {
     contentType: "application/json",
     upsert: true,

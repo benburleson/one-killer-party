@@ -1,9 +1,11 @@
 # Mystery content package contract (schema version 1)
 
-**Status: M2.1a contract and M2.1b local-only persistence are implemented.**
-The pure domain files remain isolated; the trusted loader is not wired to
-application routes, server components, host operations or gameplay. No
-production storage, registry migration, publication or gameplay is authorized.
+**Status: M2.1a contract and M2.1b persistence are implemented.** The owner
+reports the package migration applied to Production; this is not independently
+verified. No Production publisher, operator credential, publication,
+rehearsal or gameplay is authorized by this contract. The pure domain files
+remain isolated; the trusted loader is not wired to application routes, server
+components, host operations or gameplay.
 This document describes the code in [`src/lib/mystery-content/`](../../src/lib/mystery-content/). The
 [mystery content architecture](mystery-content-architecture.md) (D-026–D-028)
 remains the governing design.
@@ -280,26 +282,30 @@ produce signed URLs.
 `mystery_operator` is a non-login Postgres role granted only package-bucket
 object `SELECT`/`INSERT` and publication RPC execution. The local CLI derives a
 short-lived JWT for that role from the **local** JWT secret; it does not use or
-receive the runtime `SUPABASE_SERVICE_ROLE_KEY`. The runtime server loader uses
-the app's existing service-role client for the exact-reference RPC and private
-object download. Supabase service-role credentials still bypass RLS and have
-broad Storage API powers; application code must not use them outside the
-server-only loader and narrow RPCs. Triggers protect against API-level
-overwrite/deletion, but a database owner/superuser can disable triggers or
-alter the schema. Production needs a separately controlled operator signing
-credential and privileged database administrators remain trusted.
+receive the runtime `SUPABASE_SERVICE_ROLE_KEY`. Never generalize the local
+signing-secret pattern to Production. The runtime server loader uses the app's
+existing service-role client for the exact-reference RPC and private object
+download. Supabase service-role credentials still bypass RLS and have broad
+Storage API powers; application code must not use them outside the server-only
+loader and narrow RPCs. Triggers protect against API-level overwrite/deletion,
+but a database owner/superuser can disable triggers or alter the schema.
+Production needs a separately controlled operator signing credential and
+privileged database administrators remain trusted.
 
 ### Local operator publishing and trust boundary
 
 Only a disposable local Supabase target is implemented. Keep the synthetic or
 private JSON input **outside this repository** and expose local credentials
 only to the operator process. The CLI refuses a non-loopback URL, requires
-`--target local` plus explicit approval metadata and `--confirm-approval`,
-accepts only the named `eight-role-prototype-v1` rules, and logs only status,
-identity and digest. It does not report file paths, payloads, provider errors
-or credentials. Example (the variables must be set from the disposable local
-stack's status in a private shell environment; never copy status output into a
-PR or log):
+`--target local`, `--confirm-approval` and non-secret metadata, accepts only
+the named `eight-role-prototype-v1` rules, and logs only status, identity and
+digest. It does not report file paths, payloads, provider errors or
+credentials. Local `--approved-by` and `--approval-reference` values are
+provenance labels, not proof of an independent approval; the local adapter
+exists only for disposable synthetic work. A production verifier must
+independently authenticate and authorize an approval before bytes are uploaded.
+Example (the variables must be set from the disposable local stack's status in
+a private shell environment; never copy status output into a PR or log):
 
 ```sh
 npm run publish:mystery:local -- \
@@ -315,6 +321,18 @@ The sequence is upload exact sealed canonical bytes → independently download
 and call `loadVerifiedMysteryDefinition` → register the immutable identity.
 Identical retries re-read and verify existing bytes and return
 `already_published`; a differing digest for an existing version is rejected.
+The reusable publisher requires an injected verifier to return a fresh
+approval bound to the explicit environment, exact project reference, package
+ID/version/schema, canonical digest and rule-set ID. The core rejects
+mismatched, expired, future-dated or over-15-minute approvals before upload.
+A production verifier is not
+implemented. When selected, it must verify a tamper-resistant owner-approved
+artifact, distinct approver and operator identities (or an owner-approved
+equivalent), MFA, revocation and expiry, and idempotent verification only for
+the same binding. The publisher rechecks that approval immediately before
+registry insertion; record its stable approval reference and audit
+identity/time.
+Metadata-only approval is not accepted as production authorization.
 Because object storage and Postgres are not one transaction, a failed readback
 or registration can leave an unregistered orphan. Such an object is not
 returned by the trusted loader. Retry only with identical bytes; if cleanup is
@@ -348,20 +366,37 @@ requests. `npx supabase test db` additionally checks grants, RLS, RPC roles,
 legacy exclusion and registry immutability. Tests must never use linked or
 production credentials.
 
+Production credential options, permissions, backup/restore, orphan
+reconciliation, incidents, release rollback, owner-operated read-only
+preflight and separately approved synthetic rehearsal gates are documented in
+[production operations](../production-operations.md#private-mystery-package-storage-and-publishing-m21bm21c).
+The migration application status there is owner-attested, not independently
+verified. No production issuer, approval verifier, publisher target, or
+rehearsal is approved by this package contract.
+
 Back up Postgres registry state and private Storage objects together and
 restore them to the same point-in-time set. After restore, verify each registry
 digest against its object and retain every version pinned by a party. Orphans
 are excluded from loader lookup and require separately audited manual cleanup.
+The local integration check exports exact registry rows and bytes from
+disposable local Supabase into an isolated test adapter, then independently
+loads two versions and verifies missing/tampered bytes fail closed. This tests
+the registry/object consistency boundary, not a physical `pg_dump` restore or
+Storage-provider restore; that isolated full-stack rehearsal remains
+unverified.
 
-No production bucket or migration was provisioned or applied for M2.1b. Before
-any future production rollout, an owner must separately approve: (1) the exact
-target and dry-run migration list; (2) private bucket, restrictive browser
-policies, registry/RPC grants and immutable triggers; (3) a separate operator
-credential issuance/rotation/revocation design and audit trail; (4) backup,
-retention and restore rehearsal; and (5) an explicitly approved publication
-dry run. Apply the reviewed schema before deploying code that depends on its
-RPCs. Verify migration history, object digest/retention, deployment SHA and a
-production smoke test separately. None is implied by these local tests.
+The owner reports that both current migrations, including
+`20261123010000_private_mystery_packages.sql`, have been applied to Production.
+This is owner attestation, not independent verification. Before any future
+production publication, an owner must separately approve: (1) exact-target
+read-only preflight and migration/grant verification; (2) private bucket,
+restrictive browser policies, registry/RPC grants and immutable triggers; (3)
+a separate operator credential issuance/rotation/revocation design and audit
+trail; (4) encrypted backup, retention and full restore rehearsal; and (5) an
+explicitly approved synthetic publication rehearsal. Apply no migration
+without its own approval. Verify migration history, object digest/retention,
+deployment SHA and production smoke test separately. None is implied by these
+local tests.
 
 ## What the tests do and do not show
 
@@ -371,8 +406,10 @@ schema and canonical integrity. `tests/unit/mystery-publication.test.mjs`
 checks exact sealing, retries, conflicts, orphan behavior and fail-closed
 loader validation. `tests/integration/mystery-content-local.test.mjs` uses
 disposable local Supabase to exercise the actual operator CLI, Storage policies,
-readback, service/operator write boundaries and direct anon/authenticated
-Storage requests. pgTAP validates grants, RLS, RPC roles and immutable rows.
+readback, service/operator write boundaries, expired and untrusted JWT denial,
+direct anon/authenticated Storage requests and the registry/object snapshot
+round-trip adapter check. pgTAP validates grants, RLS, RPC roles and immutable
+rows.
 
 These local tests do not establish production configuration, editorial
 approval, authorization to disclose content to a party member, or secrecy of

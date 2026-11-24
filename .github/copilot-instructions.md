@@ -16,6 +16,8 @@ Use repository code and package scripts as the source of truth; avoid speculativ
 6. In the PR template, report actual commands/results, limitations, real allowlisted evidence (or “not applicable”), preview URL if verified, risks/migrations, and human verification steps. A rerun of an older SHA is not validation of a new commit.
 7. A merged PR is not proof of a remote migration, production deployment, or smoke test, and owner attestation is not independent verification; say which one you are reporting. Follow [production operations](../docs/production-operations.md); stop for human approval on production or unclear infrastructure changes.
 
+For private mystery publishing, follow the [package contract](../docs/architecture/mystery-content-package.md) and its [production credential, approval, backup and recovery gates](../docs/production-operations.md#private-mystery-package-storage-and-publishing-m21bm21c). The publisher is operator-invoked and local-only until a human approves a trusted identity issuer and independent approval verifier. Approval metadata alone is not authorization; never provide production service-role or project signing secrets.
+
 ## Safety
 - Never print, commit, or expose secrets; never copy production data into test environments.
 - Never run destructive operations against production or modify live Supabase production schemas/data.
