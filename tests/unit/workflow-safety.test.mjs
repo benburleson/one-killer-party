@@ -13,11 +13,11 @@ test("local Supabase startup failures expose only categorical diagnostics", () =
     new URL("../../.github/actions/start-local-supabase/action.yml", import.meta.url), "utf8");
   assert.match(action, /using: composite/);
   assert.match(action, /npx supabase start >\/dev\/null 2>&1/);
-  assert.match(action, /Supabase CLI start failed after \\$\{max_attempts\} attempts; raw output suppressed/);
+  assert.ok(action.includes("Supabase CLI start failed after ${max_attempts} attempts; raw output suppressed"));
   assert.match(action, /max_attempts=3/);
   assert.match(action, /attempt<=max_attempts/);
-  assert.match(action, /npx supabase stop --project-id one-killer-party --no-backup >\\/dev\\/null 2>&1 \\|\\| true/);
-  assert.match(action, /sleep "\\$delay"/);
+  assert.ok(action.includes("npx supabase stop --project-id one-killer-party --no-backup >/dev/null 2>&1 || true"));
+  assert.ok(action.includes('sleep "$delay"'));
   assert.match(action, /docker info >\/dev\/null 2>&1/);
   assert.match(action, /docker ps -a --filter 'name=one-killer-party' --format '\{\{\.Status\}\}'/);
   assert.doesNotMatch(action, /supabase status|SERVICE_ROLE_KEY|ANON_KEY/);
