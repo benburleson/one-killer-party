@@ -508,7 +508,13 @@ GitHub.
    browser-deny Storage policies. Inspect `mystery_operator` membership/grants,
    table RLS/force-RLS, immutable triggers, the exact `publish_mystery_version`
    and `get_published_mystery` execute grants, and confirm no browser role can
-   list/read package bytes. Use read-only catalog/dashboard inspection only.
+   list/read package bytes. Inspect direct and transitive operator-role
+   membership: only `authenticator`, the trusted `supabase_storage_admin`
+   database service, and the explicitly trusted administrative roles allowed
+   by the reviewed artifact may assume it. Those database credentials can
+   forge claims; their custody is part of the trust boundary. Repeat this review
+   after installation because later role grants are not prevented by the
+   installer. Use read-only catalog/dashboard inspection only.
    If using the SQL editor, run only read-only checks like the following and
    keep raw result rows in the owner's restricted audit system:
 

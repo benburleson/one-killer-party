@@ -1,13 +1,49 @@
--- Run only against a disposable migrated local database with psql -X.
+-- Run only against a disposable migrated local database.
 -- Installation and synthetic data are rolled back, including on connection loss.
+-- ON_ERROR_STOP plus the final finish() check makes pgTAP failures exit nonzero.
 \set ON_ERROR_STOP on
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path TO public, extensions;
 GRANT USAGE ON SCHEMA extensions TO mystery_operator, supabase_auth_admin;
-\ir ../../scripts/production-publisher-hook-review.sql
-\ir ../../scripts/production-publisher-hook-review.sql
 SELECT no_plan();
+
+CREATE ROLE synthetic_direct_operator_member NOLOGIN;
+GRANT mystery_operator TO synthetic_direct_operator_member;
+SAVEPOINT direct_member_check;
+-- The installer must fail here; capture its SQLSTATE before recovering.
+\set ON_ERROR_STOP off
+\ir production-publisher-hook-review.inc
+\set direct_member_sqlstate :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT direct_member_check;
+SELECT is(:'direct_member_sqlstate'::text, '42501'::text, 'direct untrusted role membership blocks installation');
+SELECT ok(pg_catalog.to_regclass('private_mystery.production_publisher_install') IS NULL,
+  'rejected installation leaves no installation marker');
+REVOKE mystery_operator FROM synthetic_direct_operator_member;
+DROP ROLE synthetic_direct_operator_member;
+
+\ir production-publisher-hook-review.inc
+\ir production-publisher-hook-review.inc
+CREATE ROLE synthetic_operator_bridge NOLOGIN;
+CREATE ROLE synthetic_indirect_operator_member NOLOGIN;
+GRANT mystery_operator TO synthetic_operator_bridge;
+GRANT synthetic_operator_bridge TO synthetic_indirect_operator_member;
+SELECT ok(pg_catalog.pg_has_role('synthetic_indirect_operator_member', 'mystery_operator', 'MEMBER'),
+  'synthetic indirect member reaches operator through a role bridge');
+SAVEPOINT indirect_member_check;
+-- Both the untrusted bridge and its indirect member must be rejected.
+\set ON_ERROR_STOP off
+\ir production-publisher-hook-review.inc
+\set indirect_member_sqlstate :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT indirect_member_check;
+SELECT is(:'indirect_member_sqlstate'::text, '42501'::text,
+  'transitive untrusted role membership blocks repeat installation');
+REVOKE synthetic_operator_bridge FROM synthetic_indirect_operator_member;
+REVOKE mystery_operator FROM synthetic_operator_bridge;
+DROP ROLE synthetic_indirect_operator_member;
+DROP ROLE synthetic_operator_bridge;
 
 INSERT INTO auth.users (id, aud, role, email, is_anonymous) VALUES
   ('00000000-0000-4000-8000-000000000901', 'authenticated', 'authenticated', 'publisher-synthetic@test.invalid', false),
@@ -36,6 +72,8 @@ SELECT is(
   '{"user_id":"00000000-0000-4000-8000-000000000901","claims":{"role":"service_role","extra":42}}'::jsonb,
   'mapped user cannot change a different upstream role'
 );
+SELECT pg_catalog.pg_has_role(current_user, 'supabase_auth_admin', 'MEMBER') AS can_set_auth_admin \gset
+\if :can_set_auth_admin
 SET LOCAL ROLE supabase_auth_admin;
 SELECT is(
   private_mystery.production_publisher_hook(
@@ -44,6 +82,9 @@ SELECT is(
   'auth admin can invoke the hook without table access'
 );
 RESET ROLE;
+\else
+SELECT skip('test runner cannot assume supabase_auth_admin');
+\endif
 SELECT ok(
   NOT pg_catalog.has_table_privilege('supabase_auth_admin', 'private_mystery.production_publisher_identity', 'SELECT')
   AND NOT pg_catalog.has_function_privilege('authenticated', 'private_mystery.production_publisher_hook(jsonb)', 'EXECUTE')
@@ -177,5 +218,13 @@ SELECT ok(
   AND pg_catalog.to_regprocedure('private_mystery.publish_mystery_version(text,text,integer,text,text,text,text,text,text)') IS NULL,
   'reviewed rollback restores the original registration entry point'
 );
-SELECT * FROM finish();
+CREATE TEMP TABLE publisher_test_finish ON COMMIT DROP AS SELECT * FROM finish();
+TABLE publisher_test_finish;
+DO $$
+BEGIN
+  IF (SELECT count(*) <> 1 OR NOT bool_and(finish ~ '^1\.\.[0-9]+$') FROM publisher_test_finish) THEN
+    RAISE EXCEPTION 'publisher pgTAP assertions failed';
+  END IF;
+END;
+$$;
 ROLLBACK;
