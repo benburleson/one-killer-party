@@ -52,9 +52,7 @@ privileges.
 
 **Private-source policy (D-026):** Do not commit new private dossiers, murderer revelations, solution text or future clues to this public repo, SQL migrations, test fixtures, issues or PR discussions. Author them in an access-controlled private editorial source, reviewed by an authorized editor. The exact private editor/repository is an operational choice, not a dependency on the runtime. This repo may retain **synthetic** test packages and spoiler-free public metadata.
 
-**Publication path (implemented):** The owner-run Production CLI validates and seals with the named rule set, writes a private immutable object at `mystery/version/digest`, verifies canonical bytes on readback, then registers the exact version with its rule-set ID and owner approval metadata. The Production Auth hook maps the one approved publisher identity to `mystery_operator`; the guarded RPC and restrictive Storage policy require the current identity mapping and MFA `aal2`. Cloudflare Turnstile, fresh TOTP and project/identity/digest-scoped `PUBLISH` confirmation protect normal operation. The upload and registry transaction are not atomic: investigate possible orphans and retry **only identical bytes**. Browser roles cannot read or publish private packages; never serve unregistered content. The synthetic Production rehearsal succeeded on November 26, 2026. No real mystery or dossier content has been released.
-
-Database administrators, their credential delegates, Storage service principals and trusted JWT signing authorities remain infrastructure trust boundaries. Never pass service-role/admin/signing secrets into the publisher CLI or browser. See [Production operations](../production-operations.md) for current configuration, credential handling, backups and incident response.
+**Publication security design:** A dedicated MFA-authenticated operator can publish only through a narrow guarded RPC and private object policy. Exact-reference publication validates canonical bytes, requires explicit project/version/digest approval, and never overwrites a published identity. Storage upload and registry registration are not atomic, so recovery must account for orphan objects. Infrastructure administrators and trusted signing authorities remain trusted. For executable behavior consult the [CLI](../../scripts/mystery-publish.mjs), [migrations](../../supabase/migrations/) and [Production operations](../production-operations.md).
 
 **Preserved versions (D-027):** Every party keeps its exact pinned **published version and digest for its lifetime**, unaffected by new packages or Vercel releases. Corrections become new versions; do not mutate or upgrade existing parties, and do not fall back to latest if pinned object is missing. New parties can pin a newly approved version at creation. Retain published objects while referenced, including across deploy rollback, with durable object + database backup and restore, hash verification and schema compatibility checks. A missing/mismatched object fails closed with a safe unavailable response. Cache verified immutable package bytes only inside a trusted server, keyed by immutable version+digest; never cache user-specific authorization results across callers. For old application deployments unable to interpret a newer schema, prevent creating new parties using that schema until deployed code supports it, while existing party versions remain retrievable.
 
@@ -62,113 +60,11 @@ Database administrators, their credential delegates, Storage service principals 
 
 **Public-repo history cannot be retroactively private:** `docs/product/blackwood-affair.md` already includes spoiler text in public Git and historical commits. The decision protects **future private content**; it does not make those existing spoilers secret. Any removal/redaction from the public repository, handling of clones/caches or transfer to private editorial source is a **separate explicitly reviewed task**. Do not delete or rewrite existing canonical story in this ADR.
 
-**Production state and remaining work:** The owner reported applied package migrations, enabled publisher Auth hook, completed MFA/Turnstile/Keychain enrollment and verified one synthetic publication's registry and Storage metadata. Ordinary host/guest authentication still worked. Anonymous Storage download was denied; denial using a real authenticated host JWT was not demonstrated. The last known encrypted database snapshot predates publisher setup, so capture an updated encrypted registry-plus-Storage backup before further substantive changes. Private dossier access and gameplay phases remain unimplemented and require fresh, authorized server-side projections. Do not silently repin parties or equate synthetic publication with editorial approval.
+**Current Production operations, publication evidence and remaining maintenance:** [Production operations](../production-operations.md). This ADR states design intent; it does not duplicate mutable environment status or test results.
 
-## Proposed immutable package contract
+## Implemented package contract
 
-**Implemented contract:** schema version 1 exists as a pure domain module,
-documented in [mystery content package contract](mystery-content-package.md).
-That document and the code are authoritative for field names, ID and version
-rules, canonical encoding and digest scope. The types below remain an
-**illustrative summary** of the accepted direction; they are not the runtime
-types and are not a client-facing shape. IDs are stable, nonempty canonical
-identifiers within a version, not authorization tokens. Public text must be
-independently reviewed as spoiler-safe.
-
-**Digest scope refinement:** an earlier draft placed `digestSha256`,
-`publishedAt` and `provenanceRef` inside the package, which would make the
-digest cover itself. The package now carries only its own `schemaVersion`,
-`mysteryId` and `version`; the digest is computed over the whole package and
-held in the pin and registry (`PublishedVersionRef`). Publication time,
-provenance and approvals are registry-record fields for M2.1b.
-
-```ts
-type Id = string;
-type ReleasePhase = "ACT_1" | "ACT_2" | "ACT_3";
-type PartyPhase = "LOBBY" | ReleasePhase | "ACCUSATIONS" | "REVEAL" | "COMPLETE";
-// Held by a party pin and the registry, never inside the hashed package.
-type PublishedVersionRef = {
-  mysteryId: Id; version: string; schemaVersion: number; digestSha256: string;
-};
-type PublicCharacter = {
-  id: Id; publicName: string; archetype: string; description: string;
-};
-type StartingDossier = {
-  characterId: Id; biography: string; interpersonalPrompts: string[];
-  // Explicitly exclude guilt, crime method, cover story and future clues.
-};
-type MurdererBriefing = {
-  characterId: Id; releasePhase: "ACT_1";
-  guiltNotice: string; motive: string; method: string;
-  timeline: string; coverStory: string;
-};
-type Audience = { kind: "PUBLIC" } | { kind: "CHARACTER"; characterId: Id };
-type ReleasedItem = {
-  id: Id; releasePhase: ReleasePhase; audience: Audience;
-  kind: "EVIDENCE" | "PERSONAL_KNOWLEDGE" | "RUMOR";
-  text: string; essential: boolean; provenance: string;
-};
-type PublicEvent = {
-  id: Id; releasePhase: ReleasePhase; order: number; script: string;
-};
-type Solution = {
-  culpritCharacterId: Id; motiveId: Id; methodId: Id;
-  narrative: string; timeline: string; supportingItemIds: Id[];
-};
-type MysteryDefinition = {
-  schemaVersion: number; mysteryId: Id; version: string;
-  title: string; publicSynopsis: string;
-  supportedPlayerCounts: number[]; characters: PublicCharacter[];
-  startingDossiers: StartingDossier[]; murdererBriefing: MurdererBriefing;
-  items: ReleasedItem[];
-  publicEvents: PublicEvent[]; solution: Solution;
-  motiveIds: Id[]; methodIds: Id[];
-};
-```
-
-The private authoring package can include further editorial metadata, act
-objectives and relationship references as specified in the content model; they
-need explicit audience and release rules, not a generic blob passed to clients.
-`StartingDossier` is deliberately separate from Act I items: under D-023 the
-assigned player's approved starting biography and optional interpersonal
-prompts are available in `LOBBY`. Only material editorially approved for
-pre-start belongs there. **D-028 fixes the murderer reveal at ACT_1 start.** The murderer receives an ordinary nonspoiler starting dossier in LOBBY under D-023. Guilt, motive, method, chronology and cover story reside in a **separate ACT_1-only MurdererBriefing**, withheld even from that character until the host's authorized ACT_1 transition commits its release. Editorial review must remove indirect guilt and future-act leaks from all pre-start fields. No operating-host projection includes a murderer identifier.
-Future-act evidence and the solution never appear in the starting dossier.
-`EVIDENCE` means immutable official artifact/observation; personal knowledge
-and rumor are not official proof. Public events are distinct announcements.
-Solution-only material is not a released item; it is available solely through
-the reveal projection after the reveal gate.
-
-Before publication, validate the package schema, canonical ID format and
-uniqueness in each namespace; exactly eight distinct playable Blackwood roles
-and supported count `[8]`; one spoiler-safe starting dossier per role; exactly one ACT_1-only murderer briefing for the canonical culprit; valid same-version character,
-item, objective/relationship, culprit, motive and method references; allowed
-audiences, classifications and release phases; valid event ordering; and
-solution references. Reject unknown types/fields where they could introduce
-unreviewed data. Verify the digest over the defined canonical serialization of the
-complete package; the digest is not a package field. Check public fields for
-spoilers and review evidence classification, chronology, core clue coverage,
-and solvability independently of optional missions; automated validation alone
-cannot establish editorial truth or secrecy. The private publishing validator
-owns these content checks and runs before publication; the trusted server loader
-revalidates package schema and verifies stored bytes against the pinned digest
-before serving a version. Actual private content must not be imported by public source builds. Database constraints independently enforce pin and publication
-integrity, not editorial validation.
-
-A draft is mutable only before publication. Publication requires validation,
-editorial and owner approval, an immutable unique `(mysteryId, version)` and
-digest, and retained exact bytes. Never overwrite or reuse a published version,
-even for a correction: publish a new version. Party creation pins the exact
-published registry version and digest transactionally; a missing private object or digest mismatch
-fails closed, never falls back to latest. Retain object versions independently of Vercel
-deployments, coordinate DB+object restore/rollback, and prevent deletion while any party references them. A future
-schema must enforce immutability and referential integrity; service-role writes
-must not bypass publication policy.
-
-The existing placeholder is a **public roster pin, not a published private
-version**. Existing parties remain pinned to it and retain their current lobby
-behavior; do not attach a new solution to that identifier or silently repin.
-**Confirmed compatibility:** deny private-content/game-start reads for placeholder parties with a safe unavailable response. Create a separate new party for published private content; do not silently upgrade, repin or replace placeholder parties.
+Do not duplicate executable type definitions, validation constraints or encoding rules in this architecture decision record. See [the package implementation guide](mystery-content-package.md), which links to the authoritative source in `src/lib/mystery-content/` and its tests. The essential architectural choice is the split between canonical private payload bytes, an exact content identity/digest reference, and privately registered publication metadata; none of these grants authorization to disclose a dossier.
 
 ## Server read and authorization contract
 
