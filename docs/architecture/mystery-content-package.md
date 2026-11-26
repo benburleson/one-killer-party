@@ -1,16 +1,8 @@
 # Mystery content package contract (schema version 1)
 
-**Status: M2.1a contract and M2.1b persistence are implemented.** The owner
-reports the package migration applied to Production; this is not independently
-verified. The approved publication approval is an MFA-authenticated owner
-session plus exact interactive confirmation; no independent approval service or
-second human is required. Production publisher provisioning, publication,
-rehearsal and gameplay remain disabled by this contract. The pure domain files
-remain isolated; the trusted loader is not wired to application routes, server
-components, host operations or gameplay.
-This document describes the code in [`src/lib/mystery-content/`](../../src/lib/mystery-content/). The
-[mystery content architecture](mystery-content-architecture.md) (D-026–D-028)
-remains the governing design.
+**Current state:** The schema, canonical SHA-256 sealing, validator, private Storage bucket, immutable Postgres registry, trusted server-only loader and operator publishing CLI are implemented. A dedicated, MFA-protected publisher is active in Production; the first **synthetic** package was published and verified against registry/Storage metadata on November 26, 2026. **No real Blackwood content has been published.** This module is not wired to host/guest routes or dossier/act gameplay. Consult [Production operations](../production-operations.md) for status, credentials, publication and recovery.
+
+This is the code contract for [`src/lib/mystery-content/`](../../src/lib/mystery-content/), under the [accepted architecture](mystery-content-architecture.md) and [product decisions](../product/decisions-and-open-questions.md).
 
 ## What the module provides
 
@@ -233,193 +225,19 @@ published version 1 packages.
     it directly. A unit test guards the client boundary instead. The M2.1b
     loader that wraps it must be `server-only`.
 
-## Handoff to M2.1b
+## Private persistence and authorized publication
 
-M2.1b implements the local infrastructure below without changing this
-contract:
+The domain validator and canonical serializer contain no database or network access. The separate persistence layer stores immutable canonical JSON bytes under a `mystery/version/digest` private Storage key and registers the exact `PublishedVersionRef`, rule set, provenance, and approval metadata in `private_mystery.published_versions`. The authoritative code and SQL live in `src/lib/mystery-content/`, `supabase/migrations/`, and the operator CLIs.
 
-- **Trusted loader.** Server-only. Reads the party's pinned `mysteryId`,
-  `version`, `schemaVersion` and digest from Postgres, fetches the private
-  object, and calls `loadVerifiedMysteryDefinition` on every cold load. Any
-  failure is a safe "unavailable" response; never fall back to another version.
-  Cache verified packages only inside the server, keyed by version and digest.
-- **Immutable private object and registry.** Non-overwriting object key derived
-  from `mysteryId`, `version` and digest. The registry row holds the
-  `PublishedVersionRef` fields plus publication time, provenance, approvals,
-  locator and rule-set ID. Enforce uniqueness and immutability in the database.
-- **Operator-only publication.** A trusted tool runs `sealMysteryDefinition`,
-  uploads `sealed.bytes`, reads them back, verifies them with
-  `loadVerifiedMysteryDefinition`, then registers. No CI or agent publishing
-  and no automatic publication.
-- **Legacy pin.** Placeholder parties stay as they are. The loader must deny
-  private-content reads for them; this module already refuses a package that
-  claims that identity.
-- **Approval boundary.** Bucket creation, migrations and any production change
-  need specific human approval under
-  [production operations](../production-operations.md).
+- The `mystery_operator` role cannot log into Postgres and has only the guarded Storage object and registration RPC capabilities; it cannot directly update/delete registry rows or existing objects. The **enabled** Custom Access Token Hook maps a single, owner-authorized Auth UUID to this role.
+- The guard and restrictive Storage policy independently require the current identity mapping and an MFA-verified JWT (`aal2`). Normal `anon`, `authenticated` and `service_role` identities do not inherit operator membership; administrative and trusted signing principals remain an infrastructure boundary.
+- The operator authenticates with password, Cloudflare Turnstile, and TOTP; the Production CLI verifies signed-in identity, issuer, role and freshness and requires exact interactive `PUBLISH` confirmation for the approved project, version, rule set and canonical digest. The password is stored in a project-scoped macOS Keychain entry; neither token nor TOTP secret is persisted.
+- The publisher uploads, independently downloads and checks canonical bytes, then registers the immutable record. Upload and registration are **not atomic**; a failure may leave an unregistered orphan. Retry only identical bytes after inspecting the object and registry. Never replace an existing published version or auto-delete objects.
+- The trusted loader fetches only an exact published reference and fails closed with `CONTENT_UNAVAILABLE` on missing, invalid or mismatching bytes, schema, rules or registry data. It does **not** grant permission to display the package. A future player flow must re-check party pin, current membership, character assignment and phase before constructing a minimal own-dossier projection.
+- Existing parties pinned to `blackwood-affair/first-playtest-placeholder-v1` remain public-lobby-only; a released mystery requires a **new** party pin. Never migrate or repin existing parties silently.
+- `npm run publish:mystery:local` and local JWT signing are **disposable integration-test tools**, not Production credentials or release procedures. Production uses `npm run mystery:publish -- --target production --keychain /absolute/path/outside/repo.json` **only with separate owner approval**.
 
-## M2.1b private persistence (local only)
-
-Migration `20261123010000_private_mystery_packages.sql` creates the private
-`private-mystery-packages` bucket and a `private_mystery.published_versions`
-registry. The immutable unique key is `(mystery_id, version)`; the row also
-stores `schema_version`, `digest_sha256`, the canonical `object_path`,
-`rule_set_id`, `published_at`, `provenance`, `approved_by` and
-`approval_reference`. It contains no package content. The identity
-`blackwood-affair / first-playtest-placeholder-v1` is prohibited. Existing
-party pins and lobby tables are unchanged.
-
-The only object key is
-`{mysteryId}/{version}/{digestSha256}.json` in the fixed private bucket. Its
-segments come from the canonical M2.1a identity and digest. Storage upload uses
-`upsert: false`; SQL triggers reject object updates/deletes and registry
-updates/deletes, including attempts made with the Supabase `service_role`.
-The registry itself has no direct table grants. Browser roles receive no
-package bucket listing or object operation; restrictive storage policies also
-deny a future permissive browser policy for this bucket. The narrow registration
-RPC is callable only as `mystery_operator`; the exact-reference lookup RPC is
-callable only by `service_role` and the operator. Storage credentials never
-produce signed URLs.
-
-`mystery_operator` is a non-login Postgres role granted only package-bucket
-object `SELECT`/`INSERT` and publication RPC execution. The legacy integration
-CLI derives a short-lived JWT for that role from the **local** JWT secret; the
-separate local Auth experiment described below does not require that secret.
-Neither uses the runtime `SUPABASE_SERVICE_ROLE_KEY`. Never generalize the
-local signing-secret pattern to Production. The runtime server loader uses the app's
-existing service-role client for the exact-reference RPC and private object
-download. Supabase service-role credentials still bypass RLS and have broad
-Storage API powers; application code must not use them outside the server-only
-loader and narrow RPCs. Triggers protect against API-level overwrite/deletion,
-but a database owner/superuser can disable triggers or alter the schema.
-Production needs a separately controlled operator signing credential and
-privileged database administrators remain trusted.
-
-### Local operator publishing and trust boundary
-
-The new owner-style experiment uses `npm run mystery:publish -- /absolute/path`
-against disposable local Supabase only. It takes `SUPABASE_URL` set to
-`http://127.0.0.1:54321`, `SUPABASE_ANON_KEY`,
-`MYSTERY_PUBLISHER_EMAIL` and `MYSTERY_PUBLISHER_USER_ID`; the local Auth
-password and publication confirmation are entered interactively on a TTY,
-not persisted as secrets. The locally installed, disabled-by-default
-`private_mystery.local_mystery_publisher_hook` maps one explicitly
-provisioned disposable Auth user to `mystery_operator` without adding a public
-RPC.
-The anon key alone grants no publisher access. This is a local experiment,
-not independently verified owner approval or a Production credential. Its
-setup, revocation and limitations are in
-[production operations](../production-operations.md#local-auth-publisher-experiment).
-The command and hook must be present in the checkout before those instructions
-can be used; documenting them does not itself install or verify them.
-
-The existing `scripts/publish-mystery.mjs` and
-`npm run publish:mystery:local` remain the **legacy integration harness**,
-not the new Auth flow. Keep the synthetic or private JSON input **outside this
-repository** and expose local credentials only to the operator process. This
-legacy CLI refuses a non-loopback URL, requires
-`--target local`, `--confirm-approval` and non-secret metadata, accepts only
-the named `eight-role-prototype-v1` rules, and logs only status, identity and
-digest. It does not report file paths, payloads, provider errors or
-credentials. Local `--approved-by` and `--approval-reference` values are provenance labels,
-not proof of owner authentication; the local adapter exists only for
-disposable synthetic work. Production approval must instead use the
-MFA-authenticated owner session and exact interactive confirmation bound to the
-publication target.
-Example (the variables must be set from the disposable local stack's status in
-a private shell environment; never copy status output into a PR or log):
-
-```sh
-npm run publish:mystery:local -- \
-  --target local \
-  --input /secure/outside-repository/synthetic-package.json \
-  --provenance synthetic:owner-review \
-  --approved-by local-operator \
-  --approval-reference issue-45 \
-  --confirm-approval
-```
-
-The publication sequence is upload exact sealed canonical bytes → independently download
-and call `loadVerifiedMysteryDefinition` → register the immutable identity.
-Identical retries re-read and verify existing bytes and return
-`already_published`; a differing digest for an existing version is rejected.
-The reusable publisher requires the MFA-authenticated owner session and exact
-interactive confirmation bound to the explicit environment, exact project
-reference, package ID/version/schema, canonical digest and rule-set ID. The
-core rejects mismatched, expired or future-dated session/confirmation data
-before upload. The publisher rechecks the session and confirmation immediately
-before registry insertion; record its stable approval reference and audit
-identity/time. No independent approval service is required. This leaves the
-owner account/session, MFA device and trusted Supabase administrators as
-explicit limits: compromise of those controls can authorize publication.
-Metadata-only approval is not accepted as production authorization.
-Because object storage and Postgres are not one transaction, a failed readback
-or registration can leave an unregistered orphan. Such an object is not
-returned by the trusted loader. Retry only with identical bytes; if cleanup is
-needed, a privileged operator must first verify there is no registry reference
-then perform an audited manual cleanup under an approved maintenance procedure.
-There is deliberately no cleanup command in the app or publisher. A schema
-validator result proves format/rules only, not editorial correctness,
-spoiler-safety, provenance authenticity or human approval.
-
-`loadPublishedMysteryDefinition` accepts an exact `PublishedVersionRef`, looks
-up only that full identity, checks the registered rule set and canonical
-locator, downloads only the matching registry object, and reuses the M2.1a
-digest/canonical/schema validator. Invalid references, missing or malformed
-registry rows, missing objects, unsupported rules and any storage or content
-mismatch return only `{ ok: false, code: "CONTENT_UNAVAILABLE" }`. It never
-resolves latest. This loader is **not authorization to disclose**: M2.2 must
-first re-read the party's pin and status and authenticate the caller's current
-party membership/role from trusted database state, then construct a distinct
-allowlisted own-dossier projection with phase rules. It must not pass through
-the complete `MysteryDefinition`. No route, server action, server component,
-host flow or browser component invokes this loader in M2.1b.
-
-### Verification and production boundary
-
-`npm run test:integration:mystery` runs only after a disposable local Supabase
-stack is started. It invokes the operator CLI on synthetic fixtures, exercises
-concurrent identical publication, multiple versions, conflicts, failed
-registration/orphans, readback/loading, attempts to overwrite/delete with both
-operator and service-role credentials, and direct anon/authenticated Storage
-requests. `npx supabase test db` additionally checks grants, RLS, RPC roles,
-legacy exclusion and registry immutability. Tests must never use linked or
-production credentials.
-
-Production credential options, permissions, backup/restore, orphan
-reconciliation, incidents, release rollback, owner-operated read-only
-preflight and separately approved synthetic rehearsal gates are documented in
-[production operations](../production-operations.md#private-mystery-package-storage-and-publishing-m21bm21c).
-The migration application status there is owner-attested, not independently
-verified. No production publisher target is provisioned or rehearsed by this package
-contract. The approved MFA session and exact-confirmation path does not
-establish that the managed Production Auth, Storage and RPC path works or
-authorize its use until owner provisioning and the synthetic rehearsal are
-complete.
-
-Back up Postgres registry state and private Storage objects together and
-restore them to the same point-in-time set. After restore, verify each registry
-digest against its object and retain every version pinned by a party. Orphans
-are excluded from loader lookup and require separately audited manual cleanup.
-The local integration check exports exact registry rows and bytes from
-disposable local Supabase into an isolated test adapter, then independently
-loads two versions and verifies missing/tampered bytes fail closed. This tests
-the registry/object consistency boundary, not a physical `pg_dump` restore or
-Storage-provider restore; that isolated full-stack rehearsal remains
-unverified.
-
-The owner reports that both current migrations, including
-`20261123010000_private_mystery_packages.sql`, have been applied to Production.
-This is owner attestation, not independent verification. Before any future
-production publication, an owner must separately approve: (1) exact-target
-read-only preflight and migration/grant verification; (2) private bucket,
-restrictive browser policies, registry/RPC grants and immutable triggers; (3)
-the MFA owner identity/session mapping, credential custody, revocation and
-audit trail; (4) encrypted backup, retention and full restore rehearsal; and
-(5) an explicitly approved synthetic publication rehearsal. Apply no migration
-without its own approval. Verify migration history, object digest/retention,
-deployment SHA and production smoke test separately. None is implied by these
-local tests.
+The current synthetic Production record is `synthetic-mystery/1.0.0-test.1`, canonical digest `b08af09b4470c30f6471b78ee3a3e3aa29a62f25d363fb1b803cf54c9170cdc2`. It remains private and immutable. The unauthenticated Storage download was denied; a real ordinary-host JWT denial request has **not** been completed. Backups must include both registry and exact object bytes; see [Production operations](../production-operations.md).
 
 ## What the tests do and do not show
 
