@@ -313,6 +313,72 @@ set in the shell:
 security delete-generic-password -s one-killer-party.mystery-publisher.local -a "$MYSTERY_PUBLISHER_USER_ID"
 ```
 
+#### Production CAPTCHA and first-time MFA
+
+Issue [#59](https://github.com/benburleson/one-killer-party/issues/59)
+addresses the blocked owner-operated setup described in
+[#55](https://github.com/benburleson/one-killer-party/issues/55); it does not
+authorize hook activation, a production configuration change or publication.
+The owner reports that the SQL installer, restricted grants, dedicated account
+and UUID mapping are already in place; this report is not independent
+verification. Confirm the target and that the Auth hook remains disabled
+before first-time MFA setup. Obtain separate owner approval before changing any
+Production configuration. Hook activation after enrollment is a separate
+gate, not a consequence of successful MFA enrollment.
+
+On a trusted, private device, confirm the existing Cloudflare Turnstile widget
+allows `app.onekillerparty.com` and Supabase Auth still enforces Turnstile.
+Do not change the allowlist, CAPTCHA secret or Auth settings without a new
+approval. When the CLI requests a CAPTCHA, visit
+`https://app.onekillerparty.com/publisher-verification`, start and complete its
+challenge, choose **Copy token**, and paste promptly into the hidden CLI
+prompt. The page never signs in and receives no publisher password, TOTP
+secret, session or role. The clipboard temporarily contains only the
+short-lived CAPTCHA token; clear it after pasting. Use a secure HTTPS browser
+with clipboard permission: if copying is unavailable or denied, the page
+does not display the token as a fallback. Cancel and use a supported browser.
+
+The token expires quickly, and Supabase consumes it once during password
+authentication. Never put it in a command, environment variable, URL, log,
+GitHub or chat; do not perform a separate Siteverify. If authentication fails,
+the token expires, or the CLI is cancelled, start a new challenge and use a
+fresh token for the next attempt. If the CLI prompt times out, input stays
+hidden until Enter or Ctrl-C cancels it; rerun the command and obtain a fresh
+token. This public helper grants no authority and has no app-side rate limiter;
+it relies on the existing Cloudflare challenge and Supabase Auth protections.
+Monitor abuse and provider rate limits; do not weaken CAPTCHA to accommodate
+the CLI.
+
+For initial TOTP enrollment only, configure the five Production inputs listed
+above in a private operator environment. On a trusted terminal without session
+recording, screen sharing or observers, run:
+
+```sh
+npm run mystery:publish -- --target production --enroll-mfa
+```
+
+Check the displayed project URL/ref and publisher UUID/email, then provide the
+password and a fresh CAPTCHA at the hidden prompts. The command verifies the
+Auth user against the configured UUID before modifying factors. Use a terminal
+at least 40 columns wide with enough rows for the setup key; the CLI checks
+this before enrolling. Enter the temporarily displayed setup key manually into
+the authenticator (join any displayed lines without spaces), press Enter to
+clear the temporary terminal screen, then provide its six-digit code at the
+hidden prompt. Do not copy the setup key, QR code, codes, recovery information,
+JWTs or credentials into a clipboard, log, file, GitHub or chat. Clearing a
+terminal screen cannot erase recordings, scrollback or observations; use a
+protected device and follow the approved credential-custody procedure. The
+command checks the verified factor and `aal2`, signs out and does not use
+Keychain, Storage, publication RPC or a publisher role.
+
+If any factor already exists, the command refuses to add another. Use an
+existing verified authenticator for normal operation; if it is lost, stop and
+follow the separately approved Auth recovery process. An interruption or
+failed verification can leave an unverified factor: verify the project and
+UUID and have the owner remove it through that approved recovery process
+before retrying. Do not silently remove or replace a verified factor. Do not
+enable the Auth hook as part of this flow.
+
 After the separate owner-approved provisioning and native-Mac acceptance gates,
 configure the five nonsecret Production inputs listed above in a private
 operator environment, not git, CI or Vercel. Then run:
@@ -322,12 +388,13 @@ npm run mystery:publish -- --target production --enroll-keychain
 ```
 
 Verify the full project ref/URL and dedicated UUID/email before supplying the
-password. This command performs Auth password sign-in, fresh TOTP verification,
-`aal2` assurance and verified user/issuer/role/audience/freshness checks; only
-then does it store the password under the project-specific service. It never
-loads a mystery, uploads an object or calls a registry RPC. Success prints
-only an enrollment confirmation. Subsequent publishing still requires fresh
-TOTP and the exact package approval:
+password. This command performs CAPTCHA-assisted Auth password sign-in, fresh
+TOTP verification, `aal2` assurance and verified
+user/issuer/role/audience/freshness checks; only then does it store the password
+under the project-specific service. It never loads a mystery, uploads an object
+or calls a registry RPC. Success prints only an enrollment confirmation.
+Subsequent publishing still requires a fresh CAPTCHA, fresh TOTP and the exact
+package approval:
 
 ```sh
 npm run mystery:publish -- --target production --keychain /absolute/path/to/package.json
@@ -676,5 +743,9 @@ For local integration CI, use Cloudflare's published dummy sitekey
 `supabase/config.toml`. This checks UI wiring and token forwarding but **does
 not test live Supabase verification**. Production smoke testing must confirm a
 real challenge succeeds for both host magic links and anonymous guest signup,
-and that a missing or invalid token is rejected by Supabase. The actual
-widget secret must never be captured in tests, PRs, or logs.
+and that a missing or invalid token is rejected by Supabase. After any
+separately approved Auth hook activation, freshly test legitimate host and guest
+flows as well as publisher authentication; stop and investigate any regression.
+Only the owner may conduct Production smoke checks under the applicable
+approval gates. The actual widget secret must never be captured in tests, PRs,
+or logs.

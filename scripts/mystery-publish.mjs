@@ -1,9 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { spawn } from "node:child_process";
-import { readFile, realpath } from "node:fs/promises";
+import { open, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { isatty } from "node:tty";
 import { fileURLToPath } from "node:url";
 import { sealMysteryDefinition } from "../src/lib/mystery-content/integrity.ts";
 import { publishMysteryDefinition } from "../src/lib/mystery-content/publication.ts";
@@ -21,6 +22,7 @@ export function parseArguments(argv) {
   let target = "local";
   let credential = "prompt";
   let mfa = false;
+  let enrollMfa = false;
   let filename;
   const seen = new Set();
   for (let i = 0; i < argv.length; i++) {
@@ -35,11 +37,18 @@ export function parseArguments(argv) {
     } else if (arg === "--mfa") {
       if (mfa) throw new Error("INVALID_ARGUMENTS");
       mfa = true;
+    } else if (arg === "--enroll-mfa") {
+      if (enrollMfa) throw new Error("INVALID_ARGUMENTS");
+      enrollMfa = true;
     } else if (arg.startsWith("-") || filename) {
       throw new Error("INVALID_ARGUMENTS");
     } else {
       filename = arg;
     }
+  }
+  if (enrollMfa) {
+    if (target !== "production" || credential !== "prompt" || mfa || filename) throw new Error("INVALID_ARGUMENTS");
+    return { target, credential, mfa: false, filename, enrollMfa: true };
   }
   if ((credential === "enroll") === Boolean(filename)) throw new Error("ABSOLUTE_INPUT_REQUIRED");
   return { target, credential, mfa: mfa || credential !== "prompt", filename };
@@ -166,7 +175,7 @@ export function verifyIdentity(session, user, expectedId) {
   }
 }
 
-export function verifyProductionIdentity(session, user, config, now = Date.now()) {
+export function verifyProductionIdentity(session, user, config, now = Date.now(), requireOperator = true) {
   const claims = jwtClaims(session?.access_token);
   const seconds = now / 1000;
   const recent = (timestamp) => Number.isFinite(timestamp) && timestamp <= seconds &&
@@ -174,7 +183,11 @@ export function verifyProductionIdentity(session, user, config, now = Date.now()
   const projectClaim = claims?.project_id ?? claims?.ref;
   return config?.target === "production" && projectRefPattern.test(config.projectRef || "") &&
     config.url === `https://${config.projectRef}.supabase.co` &&
-    config.issuer === `${config.url}/auth/v1` && verifyIdentity(session, user, config.userId) &&
+    config.issuer === `${config.url}/auth/v1` &&
+    (requireOperator ? verifyIdentity(session, user, config.userId) :
+      user?.id?.toLowerCase() === config.userId && claims?.sub?.toLowerCase() === config.userId &&
+      claims?.role === "authenticated" && claims?.aud === "authenticated" &&
+      Number.isFinite(claims?.exp) && claims.exp > seconds) &&
     claims?.iss === config.issuer && (!projectClaim || projectClaim === config.projectRef) &&
     claims.aal === "aal2" && recent(claims.iat) &&
     Array.isArray(claims.amr) && ["password", "totp"].every((method) =>
@@ -206,15 +219,19 @@ export function approvalFor(ref, userId, options = {}) {
   };
 }
 
-function passwordPrompt(input, output, label = "Publisher password") {
+export function passwordPrompt(input, output, label = "Publisher password", { timeoutMs = 0, maxLength = Infinity } = {}) {
   return new Promise((resolve) => {
     let password = "";
+    let invalid = false;
+    let expired = false;
+    let timer;
     input.setRawMode(true);
     output.write(`${label} (not echoed): `);
     input.resume();
     const finish = (value) => {
       input.removeListener("data", onData);
       input.removeListener("end", onEnd);
+      clearTimeout(timer);
       input.setRawMode(false);
       input.pause();
       output.write("\n");
@@ -224,34 +241,69 @@ function passwordPrompt(input, output, label = "Publisher password") {
     const onData = (chunk) => {
       for (const char of chunk.toString("utf8")) {
         if (char === "\u0003" || char === "\u0004") return finish(null);
-        if (char === "\r" || char === "\n") return finish(password);
+        if (char === "\r" || char === "\n") return finish(invalid || expired ? null : password);
         if (char === "\u007f" || char === "\b") password = password.slice(0, -1);
-        else if (char >= " ") password += char;
+        else if (char >= " " && password.length + char.length <= maxLength) password += char;
+        else if (maxLength !== Infinity) invalid = true;
       }
     };
     input.on("data", onData);
     input.once("end", onEnd);
+    if (timeoutMs) timer = setTimeout(() => {
+      expired = true;
+      password = "";
+      output.write("\nCAPTCHA prompt timed out. Input remains hidden; press Enter or Ctrl-C to cancel, then obtain a fresh token and retry: ");
+    }, timeoutMs);
   });
 }
 
-export async function authenticate(client, config, password, requireMfa, input, output, readPassword) {
-  const { data, error } = await client.auth.signInWithPassword({ email: config.email, password });
+async function passwordSignIn(client, config, password, input, output, readPassword) {
+  let options;
+  if (config.target === "production") {
+    output.write("Obtain a fresh publisher CAPTCHA token from https://app.onekillerparty.com/publisher-verification; paste promptly. On failure, obtain a new token.\n");
+    const captchaToken = await readPassword(input, output, "CAPTCHA token", { timeoutMs: 120000, maxLength: 8192 });
+    if (!captchaToken) throw new Error("CANCELLED");
+    if (typeof captchaToken !== "string" || !/^[\x21-\x7e]{1,8192}$/.test(captchaToken)) {
+      throw new Error("CAPTCHA_INVALID");
+    }
+    options = { captchaToken };
+  }
+  let response;
+  try {
+    response = await client.auth.signInWithPassword({ email: config.email, password, ...(options ? { options } : {}) });
+  } catch {
+    throw new Error("AUTHENTICATION_FAILED");
+  }
+  const { data, error } = response;
   if (error || !data?.session) throw new Error("AUTHENTICATION_FAILED");
-  let session = data.session;
+  return data.session;
+}
+
+async function authCall(code, call) {
+  try {
+    return await call();
+  } catch {
+    throw new Error(code);
+  }
+}
+
+export async function authenticate(client, config, password, requireMfa, input, output, readPassword) {
+  const signedIn = await passwordSignIn(client, config, password, input, output, readPassword);
+  let session = signedIn;
   if (requireMfa || config.target === "production") {
-    const factors = await client.auth.mfa.listFactors();
+    const factors = await authCall("MFA_FACTOR_REQUIRED", () => client.auth.mfa.listFactors());
     if (factors.error || factors.data?.totp?.length !== 1 ||
         factors.data.totp[0].status !== "verified") throw new Error("MFA_FACTOR_REQUIRED");
     const code = await readPassword(input, output, "Authenticator code");
     if (!code) throw new Error("CANCELLED");
     if (!/^\d{6}$/.test(code)) throw new Error("MFA_FAILED");
-    const verified = await client.auth.mfa.challengeAndVerify({ factorId: factors.data.totp[0].id, code });
+    const verified = await authCall("MFA_FAILED", () => client.auth.mfa.challengeAndVerify({ factorId: factors.data.totp[0].id, code }));
     if (verified.error || !verified.data?.access_token) throw new Error("MFA_FAILED");
     session = verified.data;
-    const assurance = await client.auth.mfa.getAuthenticatorAssuranceLevel(session.access_token);
+    const assurance = await authCall("MFA_FAILED", () => client.auth.mfa.getAuthenticatorAssuranceLevel(session.access_token));
     if (assurance.error || assurance.data?.currentLevel !== "aal2") throw new Error("MFA_FAILED");
   }
-  const verified = await client.auth.getUser(session.access_token);
+  const verified = await authCall("PUBLISHER_IDENTITY_MISMATCH", () => client.auth.getUser(session.access_token));
   const identityValid = config.target === "production" ?
     verifyProductionIdentity(session, verified.data?.user, config) :
     verifyIdentity(session, verified.data?.user, config.userId);
@@ -259,6 +311,128 @@ export async function authenticate(client, config, password, requireMfa, input, 
     throw new Error("PUBLISHER_IDENTITY_MISMATCH");
   }
   return session;
+}
+
+function totpTerminalWidth(input, output) {
+  if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function") {
+    throw new Error("INTERACTIVE_TERMINAL_REQUIRED");
+  }
+  if (!Number.isInteger(output.columns) || output.columns < 40 ||
+      !Number.isInteger(output.rows) || output.rows < 2 + Math.ceil(128 / (output.columns - 1))) {
+    throw new Error("TERMINAL_TOO_SMALL");
+  }
+  return output.columns - 1;
+}
+
+export async function checkTotpTerminal(input, output, openTerminal = open, terminalIsTTY = isatty) {
+  totpTerminalWidth(input, output);
+  let terminal;
+  try {
+    terminal = await openTerminal("/dev/tty", "w");
+    if (!terminalIsTTY(terminal.fd)) throw new Error("NOT_A_TTY");
+  } catch {
+    throw new Error("INTERACTIVE_TERMINAL_REQUIRED");
+  } finally {
+    if (terminal) {
+      try { await terminal.close(); } catch { /* Never expose terminal errors. */ }
+    }
+  }
+}
+
+export async function showTotpSecret(input, output, secret, openTerminal = open, terminalIsTTY = isatty) {
+  const width = totpTerminalWidth(input, output);
+  const lines = [];
+  for (let offset = 0; offset < secret.length; offset += width) lines.push(secret.slice(offset, offset + width));
+  const display = `Setup key:\r\n${lines.join("\r\n")}`;
+  output.write("Enter the setup key in your authenticator. Disable terminal recording and protect against observers; the key will be cleared on Enter.\n");
+  let terminal;
+  try {
+    terminal = await openTerminal("/dev/tty", "w");
+    if (!terminalIsTTY(terminal.fd)) throw new Error("NOT_A_TTY");
+  } catch {
+    if (terminal) {
+      try { await terminal.close(); } catch { /* Never expose terminal errors. */ }
+    }
+    throw new Error("INTERACTIVE_TERMINAL_REQUIRED");
+  }
+  try {
+    await terminal.write("\x1b[?1049h\x1b[2J\x1b[H");
+    await terminal.write(display);
+    let onData;
+    let onEnd;
+    try {
+      return await new Promise((resolve) => {
+        input.setRawMode(true);
+        onEnd = () => resolve(false);
+        onData = (chunk) => {
+          for (const char of chunk.toString("utf8")) {
+            if (char === "\u0003" || char === "\u0004") return resolve(false);
+            if (char === "\r" || char === "\n") return resolve(true);
+          }
+        };
+        input.on("data", onData);
+        input.once("end", onEnd);
+        input.resume();
+      });
+    } finally {
+      if (onData) input.removeListener("data", onData);
+      if (onEnd) input.removeListener("end", onEnd);
+      try {
+        input.setRawMode(false);
+        input.pause();
+      } catch {
+        // The terminal may already have disconnected.
+      }
+    }
+  } catch {
+    throw new Error("INTERACTIVE_TERMINAL_REQUIRED");
+  } finally {
+    try { await terminal.write("\x1b[2J\x1b[H\x1b[?1049l"); } catch { /* Best effort on terminal failure. */ }
+    try { await terminal.close(); } catch { /* Never expose terminal errors. */ }
+  }
+}
+
+async function enrollTotp(client, config, password, input, output, readPassword, showSecret, checkTerminal) {
+  const session = await passwordSignIn(client, config, password, input, output, readPassword);
+  const initial = await authCall("PUBLISHER_IDENTITY_MISMATCH", () => client.auth.getUser(session.access_token));
+  const claims = jwtClaims(session.access_token);
+  if (initial.error || initial.data?.user?.id?.toLowerCase() !== config.userId ||
+      claims?.sub?.toLowerCase() !== config.userId || claims?.iss !== config.issuer ||
+      claims?.role !== "authenticated" || claims?.aud !== "authenticated" ||
+      ((claims?.project_id ?? claims?.ref) && (claims.project_id ?? claims.ref) !== config.projectRef) ||
+      !Number.isFinite(claims?.exp) || claims.exp <= Date.now() / 1000) {
+    throw new Error("PUBLISHER_IDENTITY_MISMATCH");
+  }
+  const factors = await authCall("MFA_FACTOR_CHECK_FAILED", () => client.auth.mfa.listFactors());
+  if (factors.error || !Array.isArray(factors.data?.all)) throw new Error("MFA_FACTOR_CHECK_FAILED");
+  if (factors.data.all.length !== 0) {
+    output.write("Existing MFA factor detected; none was removed. For a verified factor, use its existing authenticator. " +
+      "For an unverified factor, verify the project and UUID, then have the owner remove it through the separately approved Auth recovery procedure before retrying. Do not remove a verified factor without approved recovery.\n");
+    throw new Error("MFA_FACTOR_EXISTS");
+  }
+  await checkTerminal(input, output);
+  const enrolled = await authCall("MFA_ENROLLMENT_FAILED", () => client.auth.mfa.enroll({ factorType: "totp" }));
+  const secret = enrolled.data?.totp?.secret;
+  if (enrolled.error || !enrolled.data?.id || enrolled.data?.type !== "totp" ||
+      typeof secret !== "string" || !/^[A-Z2-7]{16,128}$/i.test(secret)) throw new Error("MFA_ENROLLMENT_FAILED");
+  output.write("If interrupted, an unverified factor may remain. Use the approved Auth recovery procedure before retrying.\n");
+  if (!await showSecret(input, output, secret)) throw new Error("CANCELLED");
+  const code = await readPassword(input, output, "Authenticator code");
+  if (!code) throw new Error("CANCELLED");
+  if (!/^\d{6}$/.test(code)) throw new Error("MFA_FAILED");
+  const verified = await authCall("MFA_FAILED", () => client.auth.mfa.challengeAndVerify({ factorId: enrolled.data.id, code }));
+  if (verified.error || !verified.data?.access_token) throw new Error("MFA_FAILED");
+  const assurance = await authCall("MFA_FAILED", () => client.auth.mfa.getAuthenticatorAssuranceLevel(verified.data.access_token));
+  if (assurance.error || assurance.data?.currentLevel !== "aal2") throw new Error("MFA_FAILED");
+  const user = await authCall("PUBLISHER_IDENTITY_MISMATCH", () => client.auth.getUser(verified.data.access_token));
+  if (user.error || !verifyProductionIdentity(verified.data, user.data?.user, config, Date.now(), false)) {
+    throw new Error("PUBLISHER_IDENTITY_MISMATCH");
+  }
+  const after = await authCall("MFA_FACTOR_CHECK_FAILED", () => client.auth.mfa.listFactors());
+  if (after.error || !Array.isArray(after.data?.all) || after.data.all.length !== 1 ||
+      after.data.all[0]?.id !== enrolled.data.id || after.data.all[0]?.factor_type !== "totp" ||
+      after.data.all[0]?.status !== "verified") throw new Error("MFA_FACTOR_CHECK_FAILED");
+  output.write("Production TOTP enrollment verified at AAL2. Auth hook activation remains a separate approval.\n");
 }
 
 function confirmPrompt(input, output) {
@@ -314,11 +488,15 @@ export function publicationStore(client, diagnostics, beforeRegister) {
 
 export async function publish({ argv, env, input, output, makeClient = createClient,
   readPassword = passwordPrompt, confirm = confirmPrompt, credentialStore = keychain,
-  loadPackage = readPackage, platform = process.platform }) {
+  loadPackage = readPackage, platform = process.platform, showSecret = showTotpSecret,
+  checkTerminal = checkTotpTerminal }) {
   const options = parseArguments(argv);
   const packageData = options.filename ? await loadPackage(options.filename) : null;
   const config = options.target === "production" ? productionConfiguration(env) : localConfiguration(env);
   if (!input.isTTY || !output.isTTY) throw new Error("INTERACTIVE_TERMINAL_REQUIRED");
+  if (options.enrollMfa) {
+    output.write(`TOTP enrollment target: ${config.url}, project: ${config.projectRef}\nPublisher: ${config.userId} (${config.email})\n`);
+  }
   if (options.credential === "enroll") {
     if (platform !== "darwin") throw new Error("KEYCHAIN_MACOS_REQUIRED");
     output.write(`Keychain enrollment target: ${config.target} (${config.url}), project: ${config.projectRef}\n` +
@@ -332,6 +510,10 @@ export async function publish({ argv, env, input, output, makeClient = createCli
     await readPassword(input, output);
   if (!password) throw new Error("CANCELLED");
   try {
+    if (options.enrollMfa) {
+      await enrollTotp(client, config, password, input, output, readPassword, showSecret, checkTerminal);
+      return;
+    }
     const session = await authenticate(client, config, password, options.mfa, input, output, readPassword);
     if (options.credential === "enroll") {
       try {
@@ -360,7 +542,7 @@ export async function publish({ argv, env, input, output, makeClient = createCli
           currentPackage.ref.mysteryId !== currentRef.mysteryId ||
           currentPackage.ref.version !== currentRef.version ||
           currentPackage.ref.schemaVersion !== currentRef.schemaVersion) throw new Error("PACKAGE_CHANGED");
-      const currentUser = await client.auth.getUser(session.access_token);
+      const currentUser = await authCall("PUBLISHER_IDENTITY_MISMATCH", () => client.auth.getUser(session.access_token));
       if (currentUser.error || !verifyProductionIdentity(session, currentUser.data?.user, config)) {
         throw new Error("PUBLISHER_IDENTITY_MISMATCH");
       }
