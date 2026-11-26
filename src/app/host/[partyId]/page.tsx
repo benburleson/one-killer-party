@@ -4,7 +4,6 @@ import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { currentUserId } from "@/lib/host/auth";
 import { lobbyService } from "@/lib/lobby/service";
-import { BLACKWOOD_PUBLIC_CHARACTERS } from "@/lib/lobby/public-characters";
 import { AssignCharacterForm, EnrollHostForm, RecoveryForm, RemoveParticipantForm, RotateForm } from "../forms";
 import { signOut } from "../actions";
 import { HostLobbySync } from "../../lobby-sync";
@@ -26,12 +25,12 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
   // Client components receive explicit allowlisted props, never whole server records.
   const assignmentRoster = participants.map(({ participantId, displayName, assignedCharacterId }) =>
     ({ participantId, displayName, assignedCharacterId }));
-  const characterOptions = BLACKWOOD_PUBLIC_CHARACTERS.map(({ id, publicName, archetype }) =>
+  const characterOptions = party.characters.map(({ id, publicName, archetype }) =>
     ({ id, publicName, archetype }));
-  const capacity = party.mysteryId === "blackwood-affair" ? 8 : null;
+  const capacity = 8;
   return <>
     <div className="flex justify-between gap-4">
-      <h1 className="text-3xl font-bold">Blackwood Affair</h1>
+      <h1 className="text-3xl font-bold">{party.title}</h1>
       <form action={signOut}><button className="underline">Sign out</button></form>
     </div>
     <p className="mt-4">Party: {party.partyId}</p>
@@ -39,7 +38,7 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
     <HostLobbySync partyId={party.partyId} version={roster.version} />
     <h2 className="mb-3 mt-8 text-xl font-semibold">Public character roster</h2>
     <ul className="grid gap-3 sm:grid-cols-2" aria-label="Public character roster">
-      {BLACKWOOD_PUBLIC_CHARACTERS.map((character) => {
+      {party.characters.map((character) => {
         const occupant = participants.find((participant) =>
           participant.assignedCharacterId === character.id);
         return (
@@ -55,7 +54,7 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
       })}
     </ul>
     <h2 className="mb-3 mt-8 text-xl font-semibold">
-      Players ({participants.length}{capacity === null ? "" : `/${capacity}`})
+      Players ({participants.length}/{capacity})
     </h2>
     {participants.length === 0 ? <p>No players have joined yet.</p> : (
       <ul className="space-y-4">

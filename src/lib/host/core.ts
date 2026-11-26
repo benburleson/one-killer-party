@@ -1,4 +1,5 @@
 import { createHash, randomInt } from "node:crypto";
+import { publishedVersionRefSchema, type PublishedVersionRef } from "../mystery-content/schema.ts";
 
 const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -91,7 +92,10 @@ type RpcError = { code?: string } | null;
 type RpcResult = { data: unknown; error: RpcError };
 type Dependencies = {
   user: () => Promise<string | null>;
-  rpc: (name: string, args: Record<string, string | number>) => Promise<RpcResult>;
+  rpc: (name: string, args: Record<string, unknown>) => Promise<RpcResult>;
+  loadPublic?: (ref: PublishedVersionRef) => Promise<
+    { ok: true; projection: { characters: readonly { id: string }[] } } | { ok: false }
+  >;
   code?: () => string;
 };
 export type Party = { partyId: string; status: string; version: number; mysteryId?: string };
@@ -140,10 +144,38 @@ export function hostService(deps: Dependencies) {
     async create(id: unknown): Promise<IssueResult> {
       const host = await verifiedUser();
       if (!validPartyId(id)) return { kind: "unavailable" };
+      const existing = await deps.rpc("get_host_party", { p_host: host, p_party_id: id });
+      if (existing.error || !Array.isArray(existing.data) || existing.data.length > 1) return { kind: "unavailable" };
+      if (existing.data.length === 1) {
+        const found = party(existing.data[0], true);
+        return found?.partyId === id ? { kind: "existing", partyId: id } : { kind: "unavailable" };
+      }
+      const active = await deps.rpc("get_active_mystery", {});
+      if (active.error || !Array.isArray(active.data) || active.data.length !== 1 ||
+          !active.data[0] || typeof active.data[0] !== "object") return { kind: "unavailable" };
+      const row = active.data[0] as Record<string, unknown>;
+      const absent = row.mystery_id === null && row.version === null &&
+        row.schema_version === null && row.digest_sha256 === null;
+      let ref: PublishedVersionRef | null = null;
+      let characterIds: string[] | null = null;
+      if (!absent) {
+        const parsed = publishedVersionRefSchema.safeParse({
+          mysteryId: row.mystery_id, version: row.version,
+          schemaVersion: row.schema_version, digestSha256: row.digest_sha256,
+        });
+        if (!parsed.success || !deps.loadPublic) return { kind: "unavailable" };
+        ref = parsed.data;
+        const loaded = await deps.loadPublic(ref);
+        if (!loaded.ok || loaded.projection.characters.length !== 8) return { kind: "unavailable" };
+        characterIds = loaded.projection.characters.map(({ id }) => id);
+      }
       for (let attempt = 0; attempt < 5; attempt++) {
         const code = (deps.code ?? generateCode)();
-        const { data, error } = await deps.rpc("create_host_party", {
+        const { data, error } = await deps.rpc("create_pinned_host_party", {
           p_host: host, p_party_id: id, p_verifier_hash: verifier(code),
+          p_mystery_id: ref?.mysteryId ?? null, p_version: ref?.version ?? null,
+          p_schema_version: ref?.schemaVersion ?? null, p_digest_sha256: ref?.digestSha256 ?? null,
+          p_character_ids: characterIds,
         });
         if (error?.code === "23505") continue;
         if (error || !Array.isArray(data) || data.length !== 1 ||

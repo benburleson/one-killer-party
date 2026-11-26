@@ -1,12 +1,11 @@
 import "server-only";
 import type { PublishedVersionRef } from "./schema.ts";
-import { loadTrustedPublishedMystery, PRIVATE_BUCKET } from "./trusted-loader-core.ts";
+import { loadTrustedPublicMystery, loadTrustedPublishedMystery, PRIVATE_BUCKET, type TrustedPackageStore } from "./trusted-loader-core.ts";
 import { serviceRoleClient } from "@/lib/supabase/service-client";
 
-export async function loadPublishedMysteryDefinition(ref: PublishedVersionRef) {
-  try {
-    const client = serviceRoleClient();
-    return await loadTrustedPublishedMystery(ref, {
+function packageStore(): TrustedPackageStore {
+  const client = serviceRoleClient();
+  return {
       async lookup(expected) {
         const { data, error } = await client.rpc("get_published_mystery", {
           p_mystery_id: expected.mysteryId,
@@ -22,7 +21,20 @@ export async function loadPublishedMysteryDefinition(ref: PublishedVersionRef) {
         if (error || !data) throw new Error("unavailable");
         return new Uint8Array(await data.arrayBuffer());
       },
-    });
+  };
+}
+
+export async function loadPublishedMysteryDefinition(ref: PublishedVersionRef) {
+  try {
+    return await loadTrustedPublishedMystery(ref, packageStore());
+  } catch {
+    return { ok: false, code: "CONTENT_UNAVAILABLE" } as const;
+  }
+}
+
+export async function loadPublishedPublicMystery(ref: PublishedVersionRef) {
+  try {
+    return await loadTrustedPublicMystery(ref, packageStore());
   } catch {
     return { ok: false, code: "CONTENT_UNAVAILABLE" } as const;
   }

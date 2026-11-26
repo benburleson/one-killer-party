@@ -58,8 +58,13 @@ export const BLACKWOOD_PUBLIC_CHARACTERS = Object.freeze(
   blackwoodPublicCharacterEntries.map((character) => Object.freeze(character)),
 );
 
-export type PublicCharacter = (typeof BLACKWOOD_PUBLIC_CHARACTERS)[number];
-export type PublicCharacterId = PublicCharacter["id"];
+export type PublicCharacter = Readonly<{
+  id: string;
+  publicName: string;
+  archetype: string;
+  description: string;
+}>;
+export type PublicCharacterId = string;
 
 export function isBlackwoodPackage(mysteryId: unknown, mysteryVersion: unknown): boolean {
   return mysteryId === BLACKWOOD_MYSTERY_ID && mysteryVersion === BLACKWOOD_MYSTERY_VERSION;

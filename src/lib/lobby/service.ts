@@ -5,11 +5,12 @@ import { isAuthApiError, isAuthSessionMissingError } from "@supabase/supabase-js
 import { authClient, currentUserId } from "@/lib/host/auth";
 import { validPartyId, verifiedEmailHost, verifier } from "@/lib/host/core";
 import { serviceRoleClient } from "@/lib/supabase/service-client";
+import { publishedVersionRefSchema } from "@/lib/mystery-content/schema";
+import { loadPublishedPublicMystery } from "@/lib/mystery-content/trusted-loader";
 import { generateRecoveryToken, recoveryTokenVerifier, validRecoveryToken } from "./core";
 import {
   BLACKWOOD_PUBLIC_CHARACTERS,
   isBlackwoodPackage,
-  publicCharacterById,
   type PublicCharacter,
   type PublicCharacterId,
 } from "./public-characters";
@@ -33,7 +34,7 @@ export type HostParticipant = {
   assignedCharacter: PublicCharacterCard | null;
 };
 
-function membership(row: unknown): GuestMembership | null {
+function membership(row: unknown, characters: readonly PublicCharacter[]): GuestMembership | null {
   if (!row || typeof row !== "object") return null;
   const value = row as Row;
   if (!validPartyId(value.party_id) || !validPartyId(value.participant_id) ||
@@ -42,9 +43,8 @@ function membership(row: unknown): GuestMembership | null {
   const assignedCharacterId = value.assigned_character_id;
   const assignedCharacter = assignedCharacterId === null
     ? null
-    : publicCharacterById(assignedCharacterId);
-  if ((assignedCharacterId !== null && !assignedCharacter) ||
-      !isBlackwoodPackage(value.mystery_id, value.mystery_version)) return null;
+    : characters.find((character) => character.id === assignedCharacterId);
+  if (assignedCharacterId !== null && !assignedCharacter) return null;
   return {
     partyId: value.party_id,
     participantId: value.participant_id,
@@ -52,7 +52,7 @@ function membership(row: unknown): GuestMembership | null {
     status: value.status,
     participantCount: value.participant_count,
     assignedCharacterId: assignedCharacter?.id ?? null,
-    assignedCharacter,
+    assignedCharacter: assignedCharacter ?? null,
   };
 }
 
@@ -90,12 +90,42 @@ export function lobbyService() {
     if (error) throw new Error("Lobby command unavailable");
     return data;
   }
+  async function publicCatalog(principal: string, partyId: string, expected?: Row) {
+    const data = await call("get_lobby_party_pin", { p_party_id: partyId, p_principal: principal });
+    if (!Array.isArray(data) || data.length !== 1 || !data[0] || typeof data[0] !== "object") {
+      throw new Error("Lobby command unavailable");
+    }
+    const pin = data[0] as Row;
+    if (expected && (expected.mystery_id !== pin.mystery_id || expected.mystery_version !== pin.mystery_version)) {
+      throw new Error("Lobby command unavailable");
+    }
+    if (isBlackwoodPackage(pin.mystery_id, pin.mystery_version) &&
+        pin.schema_version === null && pin.digest_sha256 === null) {
+      return { title: "Blackwood Affair", characters: BLACKWOOD_PUBLIC_CHARACTERS };
+    }
+    const ref = publishedVersionRefSchema.safeParse({
+      mysteryId: pin.mystery_id, version: pin.mystery_version,
+      schemaVersion: pin.schema_version, digestSha256: pin.digest_sha256,
+    });
+    if (!ref.success) throw new Error("Lobby command unavailable");
+    const loaded = await loadPublishedPublicMystery(ref.data);
+    if (!loaded.ok) throw new Error("Lobby command unavailable");
+    return loaded.projection;
+  }
+  async function projectMembership(row: unknown, principal: string) {
+    if (!row || typeof row !== "object" || !validPartyId((row as Row).party_id)) {
+      throw new Error("Lobby command unavailable");
+    }
+    const value = row as Row;
+    const catalog = await publicCatalog(principal, value.party_id as string, value);
+    const result = membership(row, catalog.characters);
+    if (!result) throw new Error("Lobby command unavailable");
+    return result;
+  }
   async function guestMemberships(principal: string): Promise<GuestMembership[]> {
     const data = await call("get_guest_membership", { p_principal: principal });
     if (!Array.isArray(data)) throw new Error("Lobby command unavailable");
-    const memberships = data.map(membership);
-    if (memberships.some((item) => item === null)) throw new Error("Lobby command unavailable");
-    return memberships as GuestMembership[];
+    return Promise.all(data.map((row) => projectMembership(row, principal)));
   }
 
   return {
@@ -109,7 +139,7 @@ export function lobbyService() {
       });
       if (!Array.isArray(data) || data.length !== 1) return null;
       const row = data[0] as Row;
-      return row.outcome === "joined" ? membership({
+      return row.outcome === "joined" ? projectMembership({
         party_id: row.party_id,
         participant_id: row.participant_id,
         display_name: row.display_name,
@@ -118,7 +148,7 @@ export function lobbyService() {
         assigned_character_id: null,
         mystery_id: row.mystery_id,
         mystery_version: row.mystery_version,
-      }) : { outcome: row.outcome === "full" ? "full" : "unavailable" } as const;
+      }, principal) : { outcome: row.outcome === "full" ? "full" : "unavailable" } as const;
     },
     async myMemberships(principal: string): Promise<GuestMembership[]> {
       if ((await signedInUser())?.id !== principal) throw new Error("Lobby command unavailable");
@@ -129,6 +159,8 @@ export function lobbyService() {
       partyId: string;
       status: "LOBBY";
       mysteryId: string;
+      title: string;
+      characters: readonly PublicCharacter[];
       participants: HostParticipant[];
       version: number;
     }> {
@@ -137,9 +169,10 @@ export function lobbyService() {
       if (!Array.isArray(partyData) || partyData.length !== 1) throw new Error("Lobby command unavailable");
       const party = partyData[0] as Row;
       if (party.party_id !== partyId || party.status !== "LOBBY" ||
-          !Number.isSafeInteger(party.version) || !isBlackwoodPackage(party.mystery_id, party.mystery_version)) {
+          !Number.isSafeInteger(party.version)) {
         throw new Error("Lobby command unavailable");
       }
+      const catalog = await publicCatalog(host, partyId, party);
       const data = await call("list_host_participants", { p_host: host, p_party_id: partyId });
       if (!Array.isArray(data)) throw new Error("Lobby command unavailable");
       let rosterVersion = party.version as number;
@@ -147,7 +180,7 @@ export function lobbyService() {
         if (!item || typeof item !== "object") throw new Error("Lobby command unavailable");
         const row = item as Row;
         const characterId = row.assigned_character_id;
-        const assignedCharacter = characterId === null ? null : publicCharacterById(characterId);
+        const assignedCharacter = characterId === null ? null : catalog.characters.find((character) => character.id === characterId);
         if (!validPartyId(row.participant_id) || typeof row.display_name !== "string" ||
             (characterId !== null && !assignedCharacter) ||
             !Number.isSafeInteger(row.party_version) ||
@@ -160,13 +193,15 @@ export function lobbyService() {
           displayName: row.display_name,
           isHost: row.principal_id === host,
           assignedCharacterId: assignedCharacter?.id ?? null,
-          assignedCharacter,
+          assignedCharacter: assignedCharacter ?? null,
         };
       });
       return {
         partyId,
         status: "LOBBY",
         mysteryId: party.mystery_id as string,
+        title: catalog.title,
+        characters: catalog.characters,
         participants,
         version: rosterVersion,
       };
@@ -181,8 +216,11 @@ export function lobbyService() {
     ) {
       if (await currentUserId() !== host) return "unavailable" as const;
       if (!validPartyId(partyId) || !validPartyId(participantId) ||
-          !Number.isSafeInteger(expectedVersion) || expectedVersion < 0 ||
-          (characterId !== null && !BLACKWOOD_PUBLIC_CHARACTERS.some((character) => character.id === characterId))) {
+          !Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
+        return "unavailable" as const;
+      }
+      const roster = await this.hostRoster(host, partyId);
+      if (characterId !== null && !roster.characters.some((character) => character.id === characterId)) {
         return "unavailable" as const;
       }
       const data = await call("assign_public_character", {

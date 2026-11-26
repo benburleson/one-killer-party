@@ -169,7 +169,7 @@ serialization/import boundaries.
 
 ## M2.2 — Approved private dossier delivery (2026-11-26)
 
-**Design approved; not implemented.** D-030–D-035 in the [decision register](../product/decisions-and-open-questions.md) govern this slice. M2.2 remains LOBBY-only.
+**Implementation in progress; not ready for activation or deployment.** D-030–D-035 in the [decision register](../product/decisions-and-open-questions.md) govern this slice. M2.2 remains LOBBY-only.
 
 ### Published party creation
 

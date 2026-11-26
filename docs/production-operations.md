@@ -132,6 +132,68 @@ An upload and registry insertion are **not atomic**. After partial failure, paus
 
 ## Backups, restoration and rollback
 
+### Pending activated-lobby deployment
+
+The activated-lobby work is **not yet approved for Production**. Do not activate
+until its end-to-end tests and the owner-operated verification procedure below
+are complete and independently reviewed. Publication alone does not activate.
+The local-only `scripts/activate-mystery-local.mjs` verifies the exact registry
+reference and package bytes before updating the disposable local database; it
+explicitly refuses Production. Its arguments are `--local MYSTERY_ID VERSION
+SCHEMA_VERSION SHA256 --confirm-local-activation`. Run it only after synthetic
+publication against the disposable stack. It does not publish packages.
+
+Before any eventual migration, back up both database and object storage and
+check for non-placeholder rows using a read-only query on the target database:
+`SELECT id, mystery_id, mystery_version FROM public.parties WHERE NOT
+(mystery_id = 'blackwood-affair' AND mystery_version =
+'first-playtest-placeholder-v1');`. Existing rows have no complete published
+pin. The migration deliberately fails if such rows exist; stop and have the
+owner decide their handling rather than deleting, rewriting, or inventing pins.
+Keep the pointer absent until all app instances understand the migration.
+The old creation RPC refuses new parties once a pointer is active; old
+deployments cannot correctly render published parties. Roll back to an old app
+only after disabling creation and confirming no published parties require it;
+never repin or discard existing parties. Retain the database schema and all
+referenced immutable objects during an app rollback. Deployment, activation,
+and Production smoke tests remain separately authorized owner actions.
+
+For an explicitly approved future activation, an owner on a trusted machine
+must obtain the exact project reference, mystery ID, version, schema version,
+and SHA-256 from the approved publication record. Set
+`MYSTERY_VERIFICATION_SERVICE_ROLE_KEY` privately to that project's service
+key, then run `node --experimental-strip-types scripts/verify-mystery-activation.mjs
+--production PROJECT_REF MYSTERY_ID VERSION SCHEMA_VERSION SHA256 --verify-only`.
+The verifier derives the API origin from the project reference, checks the
+complete registry key and independently downloads and validates the supported
+package bytes; it never activates or prints content or credentials. A failure
+is a stop, not permission to fall back. The owner must compare every printed
+field with the approved record and independently verify that the privileged
+database connection is to the *same* project in the Supabase dashboard.
+
+Only then, through the owner-controlled database session, execute a transaction
+that updates the singleton to those exact verified values, checking that the
+returned row matches the verified output before committing:
+
+```sql
+BEGIN;
+UPDATE private_mystery.active_version
+SET mystery_id = 'APPROVED_ID', version = 'APPROVED_VERSION',
+    schema_version = APPROVED_SCHEMA, digest_sha256 = 'APPROVED_SHA256'
+WHERE singleton
+RETURNING mystery_id, version, schema_version, digest_sha256;
+-- COMMIT only after the owner verifies the complete returned reference.
+```
+
+The database owner, not the browser, publisher role, or runtime service role,
+performs this update. Do not run this example unchanged. It locks the singleton
+against concurrent creation, including the absent-pointer case. If the returned
+row or target is unexpected, `ROLLBACK`. New lobbies alone select the new
+version. To stop new published creation during incident response, owner-approved
+deactivation sets all four pointer columns to NULL in one transaction; this
+does not change existing pins. Continue using the compatible app for those
+parties and follow the general rollback and backup gates below.
+
 Supabase Free uses **owner-operated manual backups**, not a guaranteed managed backup service. Before substantial new Production changes or new real content, refresh encrypted database and private Storage backups. The latest known encrypted local database snapshot is `okp-production-20261124-132544.dump.age`; **it predates publisher provisioning and synthetic publication**. An encrypted synthetic Storage recovery fixture also exists. Encrypted off-device backup was checksum-matched and a separate local restore rehearsal validated Auth, registry/immutable guards and synthetic Storage recovery. This was **not** a complete managed, clean-room recovery test. Treat backup freshness and complete restoration as continuing operational responsibilities.
 
 Store Postgres exports and exact private object bytes with verified digests in encrypted, access-restricted off-device storage. Keep original canonical package files separately. Back up registry and matching Storage bytes as one consistent snapshot, including version pin references; record what was included and when. Don't store plaintext dumps, Auth user records, JWTs, private objects or encryption credentials in this public repo or CI. Recovery must occur in an **isolated** environment first; validate Auth, version registry, schema versions, RLS, object digests and party pins together before cutover.

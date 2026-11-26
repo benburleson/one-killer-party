@@ -11,10 +11,16 @@ INSERT INTO auth.users (id, aud, role, email) VALUES
   ('00000000-0000-4000-8000-000000000005', 'authenticated', 'authenticated', 'outsider@test.invalid'),
   ('00000000-0000-4000-8000-000000000006', 'authenticated', 'authenticated', 'replacement@test.invalid');
 
-INSERT INTO public.parties (id, host_principal_id, mystery_id, mystery_version)
+INSERT INTO private_mystery.published_versions
+  (mystery_id, version, schema_version, digest_sha256, object_path, rule_set_id, provenance, approved_by, approval_reference)
+SELECT id, version, 1, repeat('a', 64), id || '/' || version || '/' || repeat('a', 64) || '.json',
+  'eight-role-prototype-v1', 'synthetic:test', 'test-operator', 'test'
+FROM (VALUES ('test-mystery-a', 'test-v1'), ('test-mystery-b', 'test-v1'), ('test-mystery', 'v1')) AS fixture(id, version);
+
+INSERT INTO public.parties (id, host_principal_id, mystery_id, mystery_version, mystery_schema_version, mystery_digest_sha256)
 VALUES
-  ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'test-mystery-a', 'test-v1'),
-  ('10000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000004', 'test-mystery-b', 'test-v1');
+  ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'test-mystery-a', 'test-v1', 1, repeat('a', 64)),
+  ('10000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000004', 'test-mystery-b', 'test-v1', 1, repeat('a', 64));
 
 INSERT INTO public.party_character_refs (party_id, character_id) VALUES
   ('10000000-0000-4000-8000-000000000001', 'test-character-a'),
@@ -138,8 +144,8 @@ SELECT is(
 );
 
 SELECT throws_ok(
-  $$INSERT INTO public.parties (id, host_principal_id, mystery_id, mystery_version)
-    VALUES ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000005', 'test-mystery', 'v1')$$,
+  $$INSERT INTO public.parties (id, host_principal_id, mystery_id, mystery_version, mystery_schema_version, mystery_digest_sha256)
+    VALUES ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000005', 'test-mystery', 'v1', 1, repeat('a', 64))$$,
   '23505',
   NULL,
   'party UUID primary keys reject duplicates'
@@ -181,22 +187,22 @@ SELECT throws_ok(
   'participants require an existing authenticated principal'
 );
 SELECT throws_ok(
-  $$INSERT INTO public.parties (host_principal_id, mystery_id, mystery_version, status)
-    VALUES ('00000000-0000-4000-8000-000000000005', 'test-mystery', 'v1', 'STARTED')$$,
+  $$INSERT INTO public.parties (host_principal_id, mystery_id, mystery_version, mystery_schema_version, mystery_digest_sha256, status)
+    VALUES ('00000000-0000-4000-8000-000000000005', 'test-mystery', 'v1', 1, repeat('a', 64), 'STARTED')$$,
   '23514',
   NULL,
   'only the implemented LOBBY status is accepted'
 );
 SELECT throws_ok(
-  $$INSERT INTO public.parties (host_principal_id, mystery_id, mystery_version)
-    VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'test-mystery', 'v1')$$,
+  $$INSERT INTO public.parties (host_principal_id, mystery_id, mystery_version, mystery_schema_version, mystery_digest_sha256)
+    VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'test-mystery', 'v1', 1, repeat('a', 64))$$,
   '23503',
   NULL,
   'parties require an existing authenticated host principal'
 );
 SELECT throws_ok(
-  $$INSERT INTO public.parties (host_principal_id, mystery_id, mystery_version, version)
-    VALUES ('00000000-0000-4000-8000-000000000005', 'test-mystery', 'v1', -1)$$,
+  $$INSERT INTO public.parties (host_principal_id, mystery_id, mystery_version, mystery_schema_version, mystery_digest_sha256, version)
+    VALUES ('00000000-0000-4000-8000-000000000005', 'test-mystery', 'v1', 1, repeat('a', 64), -1)$$,
   '23514',
   NULL,
   'party versions cannot be negative'
