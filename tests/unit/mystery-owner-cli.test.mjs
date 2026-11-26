@@ -184,24 +184,47 @@ test("production publication uses project-scoped credentials and revalidates bef
   assert.match(events[1][1], /^local-attempt:[0-9a-f-]{36}$/);
 });
 
-test("keychain enrollment uses stdin only, refuses unsafe passwords, and verifies readback", async () => {
+test("keychain enrollment encodes passwords for stdin and verifies exact readback", async () => {
   const calls = [];
+  let stored;
   const store = createKeychain({ platform: "darwin", run: async (args, stdin, capture) => {
     calls.push({ args, stdin, capture });
-    return capture ? "fake-password_123\n" : "";
+    if (capture) return `${stored}\n`;
+    stored = stdin.match(/ -w (okp1\.[A-Za-z0-9_-]+)\n$/)?.[1];
+    assert.ok(stored);
+    return "";
   } });
-  await store.enroll(userId, "fake-password_123");
+  for (const password of ["fake-password_123", `!@#$%^&*()[]{};:'"\\|<>,.?/~`,
+    " spaces 雪 café 🐈 ", "x".repeat(1024), "x'; delete-generic-password -s other; '"]) {
+    await store.enroll(userId, password);
+    assert.equal(await store.read(userId), password);
+  }
   assert.deepEqual(calls[0].args, ["-i"]);
-  assert.match(calls[0].stdin, /fake-password_123/);
+  assert.doesNotMatch(calls[0].stdin, /fake-password_123/);
   assert.equal(calls[1].capture, true);
   assert.ok(calls.every(({ args }) => !args.join(" ").includes("fake-password_123")));
   await store.read(userId, { target: "production", projectRef: "exampleproject" });
-  assert.ok(calls[2].args.includes("one-killer-party.mystery-publisher.production.exampleproject"));
+  assert.ok(calls.at(-1).args.includes("one-killer-party.mystery-publisher.production.exampleproject"));
   await assert.rejects(store.read(userId, { target: "production", projectRef: "bad;ref" }), /KEYCHAIN_FAILED/);
-  await assert.rejects(store.enroll(userId, "invalid password\n"), /KEYCHAIN_PASSWORD_FORMAT/);
+  for (const password of ["", "invalid\npassword", "invalid\rpassword", "invalid\u0000password",
+    "invalid\u001bpassword", "invalid\u0085password", "x".repeat(1025), "\ud800"]) {
+    await assert.rejects(store.enroll(userId, password), /KEYCHAIN_PASSWORD_FORMAT/);
+  }
   await assert.rejects(createKeychain({ platform: "linux" }).read(userId), /KEYCHAIN_MACOS_REQUIRED/);
   const mismatch = createKeychain({ platform: "darwin", run: async () => "different\n" });
   await assert.rejects(mismatch.enroll(userId, "fake-password_123"), /KEYCHAIN_FAILED/);
+  for (const value of ["okp1.Y\n", "okp1._w\n", "okp1.YQ==\n", "okp1.YQ", "unsafe value\n"]) {
+    const invalid = createKeychain({ platform: "darwin", run: async () => value });
+    await assert.rejects(invalid.read(userId), /KEYCHAIN_FAILED/);
+  }
+  const legacy = createKeychain({ platform: "darwin", run: async () => "old-password_123\n" });
+  assert.equal(await legacy.read(userId), "old-password_123");
+  assert.equal(await createKeychain({ platform: "darwin", run: async () => "okp1_password\n" }).read(userId),
+    "okp1_password");
+  for (const reason of ["duplicate", "locked", "denied", "cancelled"]) {
+    const failed = createKeychain({ platform: "darwin", run: async () => { throw new Error(reason); } });
+    await assert.rejects(failed.enroll(userId, "synthetic"), { message: reason });
+  }
 });
 
 test("MFA requires fresh password login, one verified TOTP, AAL2 and verified identity", async () => {
@@ -332,7 +355,8 @@ test("Production enrollment displays destination, verifies MFA identity, and onl
   assert.doesNotMatch(fixture.text(), /fake-password_123|654321|access_token/);
   assert.deepEqual(keychainCalls[0].args, ["-i"]);
   assert.match(keychainCalls[0].stdin, /one-killer-party\.mystery-publisher\.production\.exampleproject/);
-  assert.match(keychainCalls[0].stdin, /fake-password_123/);
+  assert.match(keychainCalls[0].stdin, / -w okp1\.[A-Za-z0-9_-]+\n$/);
+  assert.doesNotMatch(keychainCalls[0].stdin, /fake-password_123/);
   assert.ok(keychainCalls.every(({ args }) => !args.join(" ").includes("fake-password_123")));
 });
 
@@ -578,8 +602,11 @@ test("production CAPTCHA is required, passed once, and provider failures are red
   let args;
   const client = { auth: { signInWithPassword: async (value) => { args = value; return { data: { session: session() } }; },
     getUser: async () => ({ data: { user: { id: userId } } }) } };
-  await authenticate(client, localConfiguration(env), "password", false, {}, {}, () => assert.fail("unexpected prompt"));
-  assert.deepEqual(args, { email: env.MYSTERY_PUBLISHER_EMAIL, password: "password" });
+  const password = ` !@#$%^&*()[]{};:'"\\|<>,.?/~ 雪 `;
+  const encoded = Buffer.from(password).toString("base64url");
+  const store = createKeychain({ platform: "darwin", run: async () => `okp1.${encoded}\n` });
+  await authenticate(client, localConfiguration(env), await store.read(userId), false, {}, {}, () => assert.fail("unexpected prompt"));
+  assert.deepEqual(args, { email: env.MYSTERY_PUBLISHER_EMAIL, password });
 });
 
 function fakeInput() {
@@ -607,6 +634,28 @@ test("hidden prompt handles unicode, cancellation, EOF, length limits and timeou
   const ending = passwordPrompt(eof, { write: () => {} });
   eof.emit("end");
   assert.equal(await ending, null);
+  const unicode = fakeInput();
+  const unicodePrompt = passwordPrompt(unicode, { write: () => {} });
+  const bytes = Buffer.from("雪🐈\u007f!\r");
+  for (const byte of bytes) unicode.emit("data", Buffer.from([byte]));
+  assert.equal(await unicodePrompt, "雪!");
+  const invalid = fakeInput();
+  const invalidPrompt = passwordPrompt(invalid, { write: () => {} }, undefined, { rejectInvalid: true });
+  invalid.emit("data", Buffer.from("abc\u001bdef\r"));
+  await assert.rejects(invalidPrompt, /KEYCHAIN_PASSWORD_FORMAT/);
+  assert.equal(invalid.raw, false);
+  for (const chunk of [Buffer.from("first\nsecond\r"), Buffer.from([0x61, 0xff, 0x62, 0x0d]),
+    Buffer.from([0x61, 0xc3, 0x0d])]) {
+    const input = fakeInput();
+    const prompt = passwordPrompt(input, { write: () => {} }, undefined, { rejectInvalid: true });
+    input.emit("data", chunk);
+    await assert.rejects(prompt, /KEYCHAIN_PASSWORD_FORMAT/);
+    assert.equal(input.raw, false);
+  }
+  const strictUnicode = fakeInput();
+  const strictPrompt = passwordPrompt(strictUnicode, { write: () => {} }, undefined, { rejectInvalid: true });
+  for (const byte of Buffer.from("雪🐈\r")) strictUnicode.emit("data", Buffer.from([byte]));
+  assert.equal(await strictPrompt, "雪🐈");
   const timeout = fakeInput();
   let timedOutput = "";
   let settled = false;

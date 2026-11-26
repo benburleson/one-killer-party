@@ -293,12 +293,25 @@ Cancel with Ctrl-C/Ctrl-D or EOF if any destination detail is wrong. It
 verifies the identity and MFA against Auth before storing the password under the Keychain
 service `one-killer-party.mystery-publisher.local`, with the user UUID as the
 account. The second retrieves it, signs in afresh, prompts for TOTP and requires
-`PUBLISH` for the displayed package. Passwords accepted by this implementation
-must use only ASCII letters, digits, `_` or `-`; choose a long random one.
-This restriction prevents quoting/command-parser ambiguity in the
-`security -i` stdin protocol; it is not an Auth password-policy change.
-Spaces, quotes, shell metacharacters, backslashes, newlines and non-ASCII
-characters are deliberately rejected for Keychain enrollment, not escaped.
+`PUBLISH` for the displayed package. Passwords may include spaces, punctuation
+and Unicode, up to 1024 UTF-8 bytes. Control characters (including newlines)
+are unsupported; Enter submits the hidden prompt, so do not paste a multiline
+password. A terminal cannot distinguish Enter from a pasted newline at a
+chunk boundary: such a paste can submit a prefix and expose subsequent input
+after the prompt closes. Use only a single-line password. Detected invalid
+input is rejected locally. This is not an Auth password-policy change.
+
+The CLI stores a versioned, unpadded base64url representation of the UTF-8
+password. This reversible encoding is **not encryption**; treat the Keychain
+item as the password itself. The encoded alphabet and validated service/account
+are the only variable inputs to `security -i`; their bounded command is well
+below its 4096-byte line limit and cannot contain parser delimiters. The
+password is not decoded by a shell or written to a file. Readback is decoded
+strictly and checked against the original before success is reported. Existing
+ASCII-only entries remain readable; new entries are not directly usable as
+passwords from Keychain Access. Do not edit them manually. A failed add or
+readback may leave an item: inspect the exact service/account and remove it
+before retrying, rather than assuming failure was atomic.
 macOS may prompt to unlock the Keychain or permit access; deny unexpected
 requests. No password is passed in process arguments or written to a file.
 Only the narrowly scoped publisher login password is stored, not its JWT or
@@ -422,6 +435,12 @@ invalidates tokens already issued.
 
 **Mandatory real-macOS acceptance checklist (not exercised by Linux CI):**
 
+- On an interactive Mac with an unlocked test Keychain, run
+  `node --experimental-strip-types --test tests/integration/mystery-keychain-macos.test.mjs`.
+  This uses a random synthetic password and UUID under the local service,
+  checks native readback and duplicate refusal, and deletes the item after
+  successful enrollment. If enrollment fails, inspect the displayed disposable
+  account in Keychain Access and remove any partial item. It does not use Auth.
 - Use only a disposable local Auth user with verified TOTP and a long synthetic
   password. Confirm target/service/account display precedes the hidden prompt.
 - Exercise the local enrollment command; verify neither password nor TOTP is
@@ -436,9 +455,8 @@ invalidates tokens already issued.
   `security find-generic-password -w`. A failed readback can leave a newly
   created item; inspect/remove it before retrying rather than assuming atomicity.
 - Check that spaces, shell metacharacters, quotes, backslashes and non-ASCII
-  passwords fail safely without a new item; verify the supported ASCII password
-  round-trips exactly. Do not relax the restriction without reviewed native
-  parser/escaping tests.
+  passwords round-trip exactly and that control characters are rejected locally.
+  Use only synthetic credentials; do not print the password or its encoding.
 - Test wrong identity/project, invalid TOTP, cancellation and EOF; no item
   should be created and no Storage/RPC publication should occur. Record only
   safe pass/fail results. Real Auth-issued MFA through Storage/RPC remains a
