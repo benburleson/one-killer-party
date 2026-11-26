@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { open, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import { createInterface } from "node:readline";
+import { StringDecoder } from "node:string_decoder";
 import { randomUUID } from "node:crypto";
 import { isatty } from "node:tty";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,14 @@ const localUrl = "http://127.0.0.1:54321";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const keychainService = "one-killer-party.mystery-publisher";
 const projectRefPattern = /^[a-z0-9]{1,63}$/;
+const encodedPasswordPrefix = "okp1.";
+
+function validKeychainPassword(password) {
+  return typeof password === "string" && password.length > 0 &&
+    !/[\u0000-\u001f\u007f-\u009f]/u.test(password) &&
+    Buffer.byteLength(password, "utf8") <= 1024 &&
+    Buffer.from(password, "utf8").toString("utf8") === password;
+}
 
 export function parseArguments(argv) {
   let target = "local";
@@ -56,9 +65,11 @@ export function parseArguments(argv) {
 
 function runSecurity(args, stdin = "", capture = false) {
   return new Promise((resolve, reject) => {
-    const child = spawn("/usr/bin/security", args, { stdio: ["pipe", capture ? "pipe" : "ignore", "ignore"] });
+    const child = spawn("/usr/bin/security", args, { stdio: ["pipe", capture ? "pipe" : "ignore", "pipe"] });
     let result = "";
     let tooLarge = false;
+    let failed = false;
+    child.stderr.on("data", () => { failed = true; });
     child.stdout?.on("data", (chunk) => {
       if (result.length + chunk.length > 16384) {
         tooLarge = true;
@@ -66,10 +77,10 @@ function runSecurity(args, stdin = "", capture = false) {
         result += chunk.toString("utf8");
       }
     });
-    child.stdin.on("error", () => {});
+    child.stdin.on("error", () => { failed = true; });
     child.on("error", () => reject(new Error("KEYCHAIN_FAILED")));
     child.on("close", (code) => {
-      if (code !== 0 || tooLarge) return reject(new Error("KEYCHAIN_FAILED"));
+      if (code !== 0 || tooLarge || failed) return reject(new Error("KEYCHAIN_FAILED"));
       resolve(result);
     });
     child.stdin.end(stdin);
@@ -89,15 +100,30 @@ export function createKeychain({ platform = process.platform, run = runSecurity 
     if (platform !== "darwin") throw new Error("KEYCHAIN_MACOS_REQUIRED");
     if (!uuid.test(userId)) throw new Error("KEYCHAIN_FAILED");
     const value = await run(["find-generic-password", "-s", serviceFor(context), "-a", userId, "-w"], "", true);
-    const password = value.replace(/\r?\n$/, "");
-    if (!/^[A-Za-z0-9_-]{1,1024}$/.test(password)) throw new Error("KEYCHAIN_FAILED");
+    if (!value.endsWith("\n")) throw new Error("KEYCHAIN_FAILED");
+    const stored = value.slice(0, -1);
+    let password;
+    if (stored.startsWith(encodedPasswordPrefix)) {
+      const encoded = stored.slice(encodedPasswordPrefix.length);
+      if (!/^[A-Za-z0-9_-]+$/.test(encoded)) throw new Error("KEYCHAIN_FAILED");
+      const bytes = Buffer.from(encoded, "base64url");
+      password = bytes.toString("utf8");
+      if (bytes.toString("base64url") !== encoded || !bytes.equals(Buffer.from(password, "utf8"))) {
+        throw new Error("KEYCHAIN_FAILED");
+      }
+    } else {
+      if (!/^[A-Za-z0-9_-]{1,1024}$/.test(stored)) throw new Error("KEYCHAIN_FAILED");
+      password = stored;
+    }
+    if (!validKeychainPassword(password)) throw new Error("KEYCHAIN_FAILED");
     return password;
   },
   async enroll(userId, password, context) {
     if (platform !== "darwin") throw new Error("KEYCHAIN_MACOS_REQUIRED");
     if (!uuid.test(userId)) throw new Error("KEYCHAIN_FAILED");
-    if (!/^[A-Za-z0-9_-]{1,1024}$/.test(password)) throw new Error("KEYCHAIN_PASSWORD_FORMAT");
-    await run(["-i"], `add-generic-password -s ${serviceFor(context)} -a ${userId} -w ${password}\n`);
+    if (!validKeychainPassword(password)) throw new Error("KEYCHAIN_PASSWORD_FORMAT");
+    const encoded = encodedPasswordPrefix + Buffer.from(password, "utf8").toString("base64url");
+    await run(["-i"], `add-generic-password -s ${serviceFor(context)} -a ${userId} -w ${encoded}\n`);
     if (await this.read(userId, context) !== password) throw new Error("KEYCHAIN_FAILED");
   },
   };
@@ -219,32 +245,37 @@ export function approvalFor(ref, userId, options = {}) {
   };
 }
 
-export function passwordPrompt(input, output, label = "Publisher password", { timeoutMs = 0, maxLength = Infinity } = {}) {
-  return new Promise((resolve) => {
+export function passwordPrompt(input, output, label = "Publisher password",
+  { timeoutMs = 0, maxLength = Infinity, rejectInvalid = false } = {}) {
+  return new Promise((resolve, reject) => {
     let password = "";
+    const decoder = new StringDecoder("utf8");
     let invalid = false;
     let expired = false;
     let timer;
     input.setRawMode(true);
     output.write(`${label} (not echoed): `);
     input.resume();
-    const finish = (value) => {
+    const finish = (value, formatError = false) => {
       input.removeListener("data", onData);
       input.removeListener("end", onEnd);
       clearTimeout(timer);
       input.setRawMode(false);
       input.pause();
       output.write("\n");
-      resolve(value);
+      if (formatError) reject(new Error("KEYCHAIN_PASSWORD_FORMAT"));
+      else resolve(value);
     };
     const onEnd = () => finish(null);
     const onData = (chunk) => {
-      for (const char of chunk.toString("utf8")) {
+      for (const char of decoder.write(chunk)) {
         if (char === "\u0003" || char === "\u0004") return finish(null);
-        if (char === "\r" || char === "\n") return finish(invalid || expired ? null : password);
-        if (char === "\u007f" || char === "\b") password = password.slice(0, -1);
+        if (char === "\r" || char === "\n") {
+          return finish(invalid || expired ? null : password, rejectInvalid && invalid && !expired);
+        }
+        if (char === "\u007f" || char === "\b") password = Array.from(password).slice(0, -1).join("");
         else if (char >= " " && password.length + char.length <= maxLength) password += char;
-        else if (maxLength !== Infinity) invalid = true;
+        else if (maxLength !== Infinity || rejectInvalid) invalid = true;
       }
     };
     input.on("data", onData);
@@ -507,8 +538,9 @@ export async function publish({ argv, env, input, output, makeClient = createCli
     auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false },
   });
   const password = options.credential === "keychain" ? await credentialStore.read(config.userId, config) :
-    await readPassword(input, output);
+    await readPassword(input, output, undefined, options.credential === "enroll" ? { rejectInvalid: true } : undefined);
   if (!password) throw new Error("CANCELLED");
+  if (options.credential === "enroll" && !validKeychainPassword(password)) throw new Error("KEYCHAIN_PASSWORD_FORMAT");
   try {
     if (options.enrollMfa) {
       await enrollTotp(client, config, password, input, output, readPassword, showSecret, checkTerminal);
@@ -519,6 +551,7 @@ export async function publish({ argv, env, input, output, makeClient = createCli
       try {
         await credentialStore.enroll(config.userId, password, config);
       } catch {
+        output.write("Keychain enrollment failed; an item may remain. Inspect the displayed service and account before retrying.\n");
         throw new Error("KEYCHAIN_FAILED");
       }
       output.write(`${config.target === "production" ? "Production" : "Local"} publisher credential enrolled in Keychain.\n`);
@@ -570,6 +603,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       console.error(code);
       if (code === "EXPAND_TILDE_IN_SHELL") {
         console.error("Use an absolute path, or leave ~ unquoted so your shell expands it.");
+      }
+      if (code === "KEYCHAIN_PASSWORD_FORMAT") {
+        console.error("Keychain passwords must be valid UTF-8, at most 1024 bytes, and contain no control characters.");
       }
       process.exitCode = 1;
     });
