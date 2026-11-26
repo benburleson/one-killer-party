@@ -244,35 +244,13 @@ identity-backed, revocable MFA session and demonstrates the exact
 confirmation workflow in the approved rehearsal; this is owner approval, not
 an independent verifier.
 
-**Installation blocker:** local Supabase PostgreSQL 17.12 returned
-`pg_has_role(delegate, operator, 'SET') = false` for the exact synthetic graph
-with a `postgres` role and SET=false edge, contrary to the reported Production
-result. Disposable Supabase also has SET-enabled
-`postgres -> authenticator -> mystery_operator` grants alongside that direct
-edge; adding a synthetic delegate of `postgres` reproduced effective SET=true
-and USAGE=false. This is a candidate explanation, not a confirmed Production
-path. Investigate all actual paths, duplicate grants and role attributes
-without assuming the cause. The revised guard requires exact membership edges
-and SET/INHERIT/ADMIN options and grantors from the disposable Supabase
-baseline, the single `cli_login_postgres -> postgres` grant, and the reported
-effective SET/USAGE results; alternate edges, duplicate rows, cycles, and
-role-option drift fail closed. Production `ADMIN` option values and the
-additional `postgres -> authenticator` path have not been independently
-verified from the evidence available to this change. In the disposable
-PostgreSQL 17 graph, a role that can SET `postgres` can also SET the full
-managed role set, including `service_role`, `pg_read_all_data`, and
-PostgreSQL monitoring/administration roles. The CLI credential therefore
-inherits the broader administrator/service trust boundary; it is not an
-application-scoped publisher credential. The guard checks every effective SET
-role and every membership edge/options/grantor reachable from `postgres`, and
-rejects added paths such as `postgres -> supabase_admin`. The Production
-catalog evidence provided for this change does not enumerate that complete
-role set or all grantors/options. A mismatch or incomplete catalog inspection
-is a blocker; do not broaden the accepted graph to fit.
-Acceptance in a disposable database does not verify the Production path.
-Manual installation remains blocked
-pending owner architecture review and a fresh post-merge read-only Production
-recheck, followed by separate installation approval.
+Supabase database administrators and their credential delegates, Storage
+service principals and project-trusted JWT signing authorities are trusted
+infrastructure. The installer does not attempt to validate their internal role
+graph; instead it checks the application's publisher role, RPC grants,
+browser-role exclusion and artifact collisions. The owner must verify the
+target and prerequisites read-only, then approve setup separately. See the
+[owner checklist](#owner-operated-production-publisher-checklist).
 
 The candidate configuration validator expects an explicitly selected
 `MYSTERY_PRODUCTION_PROJECT_REF`, matching
@@ -287,78 +265,27 @@ enrollment, and `--target production --keychain` retrieves that credential
 for routine publishing. The CLI still requires the separate provisioning,
 preflight and rehearsal gates below before any live use.
 
-Two independent gates remain:
+Production remains disabled until the owner completes this checklist after
+review and obtains separate approval:
 
-1. **Owner-run read-only Production preflight and security review.** After
-   merge, repeat the inspection below against the independently verified target
-   and reviewed revision; compare existing grants, policies, functions and Auth
-   hook configuration with the reviewed design, and stop on any mismatch or
-   existing hook. An existing hook must not be overwritten; any composition
-   requires its own review. Verify backup and recovery before requesting
-   separate, explicit authorization to install. Merge or a successful
-   read-only check is not installation approval.
-2. **Separately approved Production Auth provisioning and synthetic rehearsal.**
-   Only after approval may the owner provision a dedicated user and TOTP,
-   install and configure the reviewed boundary, and rehearse using synthetic
-   content. Prove ordinary host magic-link/OTP and anonymous guest sign-in
-   still work; prove publisher `aal1` cannot insert/read private objects or
-   register and `aal2` can, while ordinary and anonymous identities cannot
-   read private bytes or publish. Record only redacted results. No Production
-   changes or rehearsal are authorized by this PR or its CI.
+1. Verify the exact Production project, migration history, private bucket,
+   app-role checks above, immutable protections and existing Auth hook. Stop
+   on an existing hook or unexplained mismatch; verify backup and recovery.
+2. Provision the dedicated owner identity with MFA. From a trusted checkout
+   and independently verified `psql` target, run
+   `scripts/production-publisher-hook-review.sql`, add only the approved user
+   mapping, then configure the Auth hook through the supported Supabase
+   interface. The SQL entry point mutates the database; it never activates
+   Auth. Recheck grants and app-role denial, and rehearse with synthetic data.
+3. Roll back only with separate approval: stop publisher-role issuance, remove
+   the mapping and disable the hook, revoke Auth sessions, then wait for every
+   issued token to expire. Keep the guarded RPC and restrictive policy in
+   place until expiry. Only then reverse database changes and restore any
+   previous hook under its reviewed composition plan.
 
-For revocation, stop publishing and remove the private UUID mapping under an
-approved administrative procedure. The reviewed SQL checks the mapping at
-each Storage and registration request, so removal is intended to deny even
-previously issued publisher tokens at those boundaries. Also revoke Auth
-sessions, rotate the password and TOTP as appropriate, and account for tokens
-already issued elsewhere and privileged roles that bypass RLS. Confirm the
-denial in a disposable rehearsal; restoring the same UUID mapping can
-reactivate an unexpired token, so revoke sessions and wait out its lifetime
-before remapping. Do not assume disabling a hook invalidates existing JWTs.
-Before hook rollback, stop new role issuance, remove the mapping, revoke Auth
-sessions and wait for all issued publisher tokens to expire; disabling the hook
-or revoking sessions alone does not invalidate already issued JWTs. Restore
-any prior hook only through a separately reviewed plan. Only then consider a
-separately approved database reversal; do not remove the MFA policies or
-restore the unguarded RPC while publisher tokens remain usable. Never weaken
-private-bucket immutability to resolve an orphan.
-
-After both gates and an explicit authorization for the change, the owner can
-install the reviewed SQL from a trusted checkout in an authenticated `psql`
-session whose database target has been independently verified:
-
-```text
-\set ON_ERROR_STOP on
-\i scripts/production-publisher-hook-review.sql
-INSERT INTO private_mystery.production_publisher_identity (user_id)
-VALUES ('<APPROVED-PUBLISHER-AUTH-UUID>'::uuid);
-```
-
-Replace the placeholder privately, not in a committed file. The script does
-not activate Auth. If the Auth custom-access-token hook is already configured,
-stop; do not overwrite it. After separate approval, select
-`private_mystery.production_publisher_hook` as the custom-access-token hook
-using the supported Supabase configuration interface and verify the resulting
-configuration. The entry-point preflight rejects existing installation objects
-for drift review; it is not a repair or repeat-install procedure. Inspect the
-objects and grants before and after installation, and stop on collisions or
-unexpected state.
-
-To revoke the publisher, the authorized owner can remove the mapping in the
-same independently verified database:
-
-```sql
-DELETE FROM private_mystery.production_publisher_identity
-WHERE user_id = '<APPROVED-PUBLISHER-AUTH-UUID>'::uuid;
-```
-
-Confirm the old token is denied, revoke the Auth sessions, and rotate the
-credential. When rolling back, first stop role issuance, remove the mapping
-and disable the publisher hook, revoke sessions and wait out all issued token
-lifetimes. Restore a prior hook only if its exact configuration and composition
-have been reviewed. Leave the restrictive policy and guarded RPC in place
-until then. Removing those guards requires a separately approved database
-rollback and verification; simply disabling the hook is not a safe rollback.
+Do not use Production credentials or publish real content in CI. Record only
+redacted evidence. The owner checklist does not authorize or perform any
+Production action by this PR.
 
 #### macOS Keychain enrollment and use
 
@@ -578,9 +505,10 @@ triggers; use the separately reviewed reconciliation procedure below if
 cleanup is necessary. A disposable reset loses local state and is not a
 Production recovery procedure.
 
-### Owner-operated read-only Production preflight
+### Owner-operated Production publisher checklist
 
-Only an authorized owner may perform this inspection after this PR is reviewed.
+Only an authorized owner may perform this read-only check after the PR is
+merged and before separately approved installation.
 It is **read-only**: do not run `db push`, alter Auth or Storage settings, issue
 tokens, upload/delete objects, or publish. Record redacted links and result
 timestamps; do not paste secret values, package bytes or object locators in
@@ -593,180 +521,29 @@ GitHub.
    `20261123010000`; compare against reviewed migration files. Record this as
    independent verification (or report mismatch), separately from the
    owner-reported application status above.
-3. Inspect the package bucket's ID, private flag, MIME/size limits and
-   browser-deny Storage policies. Inspect `mystery_operator` membership/grants,
-   table RLS/force-RLS, immutable triggers, the exact `publish_mystery_version`
-   and `get_published_mystery` execute grants, and confirm no browser role can
-   list/read package bytes. Inspect direct and transitive operator-role
-   membership, effective privileges and the specific trusted administrative
-   delegation described below; do not treat a name alone as proof of trust.
-   Those database credentials can forge claims; their custody is part of the
-   trust boundary. Repeat this review after installation because later role
-   grants are not prevented by the installer. Use read-only catalog/dashboard
-   inspection only; the manual installer is not an inspection command.
-   If using the SQL editor, run only read-only checks like the following and
-   keep raw result rows in the owner's restricted audit system:
+3. Confirm the private bucket and publisher restriction, immutable object and
+   registry protections, exact RPC grants, and that browser roles cannot access
+   publisher privileges. Database administrators, delegates, Storage service
+   principals and trusted JWT signers are infrastructure trust boundaries;
+   this preflight does not certify their internal role graph. Run this
+   non-mutating application check in the verified database:
 
    ```sql
-   SELECT version
-   FROM supabase_migrations.schema_migrations
-   WHERE version IN ('20261123000000', '20261123010000')
-   ORDER BY version;
-
-   SELECT id, public, file_size_limit, allowed_mime_types
-   FROM storage.buckets
-   WHERE id = 'private-mystery-packages';
-
-   SELECT policyname, roles, cmd, qual, with_check
-   FROM pg_policies
-   WHERE schemaname = 'storage'
-     AND tablename IN ('objects', 'buckets')
-     AND policyname LIKE 'private_mystery%';
-
-   SELECT rolname, rolcanlogin,
-          pg_catalog.pg_has_role('authenticator', rolname, 'MEMBER') AS authenticator_member,
-          pg_catalog.has_table_privilege(rolname, 'private_mystery.published_versions', 'SELECT') AS registry_select
-   FROM pg_roles
-   WHERE rolname IN ('mystery_operator', 'anon', 'authenticated', 'service_role');
-
-   SELECT pg_catalog.has_function_privilege(
+   SELECT role_name,
+          pg_catalog.pg_has_role(role_name, 'mystery_operator', 'MEMBER') AS operator_member,
+          pg_catalog.has_function_privilege(
             role_name,
             'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)',
             'EXECUTE'
-          ) AS can_publish,
-          role_name
-   FROM unnest(ARRAY['mystery_operator', 'anon', 'authenticated', 'service_role'])
-     AS principals(role_name);
-
-   SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, t.tgname, t.tgenabled
-   FROM pg_class AS c
-   LEFT JOIN pg_trigger AS t ON t.tgrelid = c.oid AND NOT t.tgisinternal
-   WHERE c.oid IN (
-     'private_mystery.published_versions'::regclass,
-     'storage.objects'::regclass
-   )
-   ORDER BY c.relname, t.tgname;
+          ) AS can_publish
+   FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS roles(role_name);
    ```
 
-   The owner observed these Production paths: `authenticator ->
-   mystery_operator`, `postgres -> mystery_operator`,
-   `supabase_storage_admin -> authenticator -> mystery_operator`, and
-   `cli_login_postgres -> postgres -> mystery_operator`. The last is a
-   specific managed administrative delegation: `cli_login_postgres` has LOGIN
-   and effective SET on `postgres`, which has BYPASSRLS and CREATEROLE.
-   `supabase_admin` is a superuser; `mystery_operator` is NOLOGIN, NOINHERIT
-   and lacks privileged flags. The `cli_login_postgres -> postgres` grant had
-   SET=true, INHERIT=false; `postgres -> mystery_operator` had SET=false,
-   INHERIT=false. Nevertheless the owner observed effective SET=true and
-   USAGE=false for `cli_login_postgres` on `mystery_operator`, and SET=true
-   for `authenticator` on `mystery_operator`. The local PostgreSQL 17.12
-   synthetic result above differs from the reported effective SET result; the
-   locally reproduced alternate chain is a candidate, not confirmed in
-   Production. Investigate all alternate paths, duplicate grants and the
-   actual role graph. The reason is not established, and USAGE=false does not
-   prove absence of effective SET. Treat the delegate as trusted, not harmless.
-   This observation does not authorize other paths or changing grants.
-
-   For PostgreSQL versions exposing `pg_auth_members.set_option` and
-   `inherit_option`, the following read-only catalog checks enumerate inbound
-   paths (including cycles), each path's grant rows and grantors, flags and
-   effective SET/USAGE.
-   Named rows also expose missing or disconnected expected roles. The second
-   query checks roles granted *to* `mystery_operator`, which inbound traversal
-   alone cannot reveal. Run with sufficient catalog visibility; an error,
-   missing role, incomplete visibility or unsupported catalog is a blocker,
-   not a reason to omit a check. Save raw results only in restricted audit.
-
-   ```sql
-   WITH RECURSIVE paths(role_oid, path_oids, path, grants, cycle) AS (
-     SELECT r.oid, ARRAY[r.oid], r.rolname::text, '[]'::jsonb, false
-     FROM pg_catalog.pg_roles AS r
-     WHERE r.rolname = 'mystery_operator'
-     UNION ALL
-     SELECT member.oid, p.path_oids || member.oid,
-            member.rolname::text || ' -> ' || p.path,
-            pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
-              'member', member.rolname, 'role', granted.rolname,
-              'set', m.set_option, 'inherit', m.inherit_option,
-              'admin', m.admin_option,
-              'grantor', pg_catalog.pg_get_userbyid(m.grantor)
-            )) || p.grants,
-            member.oid = ANY(p.path_oids)
-     FROM paths AS p
-     JOIN pg_catalog.pg_auth_members AS m ON m.roleid = p.role_oid
-     JOIN pg_catalog.pg_roles AS member ON member.oid = m.member
-     JOIN pg_catalog.pg_roles AS granted ON granted.oid = m.roleid
-     WHERE NOT p.cycle
-   ), candidates AS (
-     SELECT 'path'::text AS kind, role_oid, NULL::text AS expected_name,
-            path, grants, cycle FROM paths
-     UNION ALL
-     SELECT 'expected', r.oid, expected.name, NULL::text, NULL::jsonb, false
-     FROM (VALUES ('mystery_operator'), ('authenticator'),
-                  ('supabase_storage_admin'), ('postgres'),
-                  ('supabase_admin'), ('cli_login_postgres')) AS expected(name)
-     LEFT JOIN pg_catalog.pg_roles AS r ON r.rolname = expected.name
-   )
-   SELECT c.kind, c.expected_name, c.path, c.grants, c.cycle,
-          r.rolname, r.rolcanlogin, r.rolinherit, r.rolsuper,
-          r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication,
-          CASE WHEN r.oid IS NOT NULL AND op_role.oid IS NOT NULL
-            THEN pg_catalog.pg_has_role(r.oid, op_role.oid, 'SET') END AS operator_set,
-          CASE WHEN r.oid IS NOT NULL AND op_role.oid IS NOT NULL
-            THEN pg_catalog.pg_has_role(r.oid, op_role.oid, 'USAGE') END AS operator_usage,
-          CASE WHEN r.oid IS NOT NULL AND admin.oid IS NOT NULL
-            THEN pg_catalog.pg_has_role(r.oid, admin.oid, 'SET') END AS postgres_set,
-          CASE WHEN r.oid IS NOT NULL AND admin.oid IS NOT NULL
-            THEN pg_catalog.pg_has_role(r.oid, admin.oid, 'USAGE') END AS postgres_usage
-   FROM candidates AS c
-   LEFT JOIN pg_catalog.pg_roles AS r ON r.oid = c.role_oid
-   LEFT JOIN pg_catalog.pg_roles AS op_role ON op_role.rolname = 'mystery_operator'
-   LEFT JOIN pg_catalog.pg_roles AS admin ON admin.rolname = 'postgres'
-   ORDER BY c.kind, c.expected_name, c.path;
-
-   SELECT granted.rolname AS role_granted_to_operator,
-          m.set_option, m.inherit_option, m.admin_option,
-          pg_catalog.pg_get_userbyid(m.grantor) AS grantor
-   FROM pg_catalog.pg_auth_members AS m
-   JOIN pg_catalog.pg_roles AS member ON member.oid = m.member
-   JOIN pg_catalog.pg_roles AS granted ON granted.oid = m.roleid
-   WHERE member.rolname = 'mystery_operator'
-   ORDER BY granted.rolname;
-
-   -- Enumerate every effective SET role and every membership edge reachable
-   -- through postgres, including service and built-in privileged roles.
-   SELECT role.rolname, role.rolcanlogin, role.rolinherit, role.rolsuper,
-          role.rolbypassrls, role.rolcreaterole, role.rolcreatedb,
-          role.rolreplication,
-          pg_catalog.pg_has_role('cli_login_postgres', role.oid, 'SET') AS delegate_set,
-          pg_catalog.pg_has_role('cli_login_postgres', role.oid, 'USAGE') AS delegate_usage
-   FROM pg_catalog.pg_roles AS role
-   WHERE role.rolname IN ('cli_login_postgres', 'postgres')
-      OR pg_catalog.pg_has_role('cli_login_postgres', role.oid, 'SET')
-   ORDER BY role.rolname;
-
-   SELECT member.rolname AS member, granted.rolname AS granted_role,
-          m.set_option, m.inherit_option, m.admin_option,
-          pg_catalog.pg_get_userbyid(m.grantor) AS grantor
-   FROM pg_catalog.pg_auth_members AS m
-   JOIN pg_catalog.pg_roles AS member ON member.oid = m.member
-   JOIN pg_catalog.pg_roles AS granted ON granted.oid = m.roleid
-   WHERE member.rolname IN ('postgres', 'authenticator', 'cli_login_postgres')
-      OR granted.rolname = 'cli_login_postgres'
-      OR pg_catalog.pg_has_role('postgres', member.oid, 'SET')
-   ORDER BY member.rolname, granted.rolname, grantor;
-   ```
-
-   Compare every path, per-grant option, role flag and effective privilege with
-   the reviewed design and the fresh target's approved baseline. Stop on any
-   unexpected member, cycle, grant, flag, effective access, missing trusted
-   path or other anomaly; investigate and obtain security review rather than
-   broadening an allowlist or altering managed grants. The previously observed
-   `cli_login_postgres` path was rejected by the then-current recursive
-   name-based installer guard; observation alone does not make that guard
-   accept it. Installation remains blocked until owner architecture review and
-   the post-merge read-only recheck resolve the discrepancy. Verify the merged
-   artifact and tests explicitly before seeking separate installation approval.
+   All rows must show `operator_member = false` and `can_publish = false`.
+   Review the bucket, policy, RLS and trigger configuration read-only in the
+   dashboard or against the reviewed migrations. Repeat after installation.
+   Never execute `scripts/production-publisher-hook-review.sql` as an inspection
+   command; it mutates the database.
 
 4. Confirm service-role credentials are confined to the server runtime; no
    publisher, GitHub Actions, Copilot, PR preview or public client receives

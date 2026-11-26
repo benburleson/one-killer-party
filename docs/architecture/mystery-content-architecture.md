@@ -58,37 +58,9 @@ privileges.
 
 **Publication path (M2.1b/M2.1c):** The local operator CLI seals with the named eight-role rule set, uploads to a **private, non-overwriting object key** (`mystery/version/digest`), independently reads back and verifies exact bytes, then registers the immutable version. The registry row stores the exact `PublishedVersionRef`, canonical object path, rule-set ID, publication time, provenance and approval reference. Registry insertion is transactional; upload plus registration is not, so failed registration leaves an unregistered orphan for audited manual cleanup. The approved owner publication approval is an MFA-authenticated session plus exact interactive confirmation bound to the target, identity, schema, digest and rule set; no independent approval service or second human is required. Production remains disabled until owner provisioning and rehearsal. No party digest pin or private game start is added in this milestone. Never serve unpublished versions. No public bucket, browser bucket/object access, browser signed URL, client-visible locator or publishing endpoint exists.
 
-The local publisher uses a dedicated non-login `mystery_operator` Postgres role with package-bucket object read/create and registration RPC privileges only; it receives no registry table access and no Storage update/delete privilege. The runtime `service_role` can call the exact-reference lookup but cannot call the registration RPC. Database triggers prevent API-level registry/object overwrite or deletion, including through `service_role`. `service_role` still bypasses RLS and can directly read private Storage objects, including orphans; the app must use the registry loader rather than raw object calls. Privileged database administrators and their credential delegates can change grants, disable triggers or alter the schema; Storage service principals and project-trusted JWT signing authorities can also operate across intended boundaries. All remain trusted, not isolated from private content or publication. Production credential issuance, rotation, audit and target design require separate owner approval.
+The local publisher uses a dedicated non-login `mystery_operator` role limited to package-object read/create and the registration RPC; it has no registry table or object update/delete access. A server-side identity mapping, `aal2` authorization, private Storage policy, guarded RPC, and immutable registry/object protections enforce the application boundary. Browser roles cannot read or publish packages.
 
-The owner observed the managed administrative delegation
-`cli_login_postgres -> postgres -> mystery_operator` in Production.
-`cli_login_postgres` can effectively SET both `postgres` and
-`mystery_operator`, even though the latter grant's SET option was false and
-effective operator USAGE was false. This is an administrative trust boundary,
-not evidence that the path is harmless. In local Supabase PostgreSQL 17.12,
-the exact synthetic graph with a `postgres` role and SET=false edge returned
-effective SET=false for the delegate on the operator. The reported Production
-result is therefore not explained by that graph alone. In disposable Supabase,
-SET-enabled `postgres -> authenticator -> mystery_operator` grants also
-exist alongside the SET=false direct edge; adding a synthetic delegate of
-`postgres` reproduced SET=true and USAGE=false. This is a candidate
-explanation, not a confirmed
-Production path. Alternate paths, duplicate grants and the actual role graph
-require investigation. In the disposable PostgreSQL 17 graph, the delegate
-can also SET `service_role` and PostgreSQL built-in privileged roles through
-`postgres`. The exact delegate is therefore trusted with the broader managed
-administrator/service-role boundary, not just publisher RPC authority. The
-review guard now checks the entire effective SET role set and all reachable
-membership edges, role options and grantors against that disposable baseline;
-an added route to `supabase_admin` or any other unapproved role is rejected.
-Production evidence supplied for this change does not establish that full role
-set or all grantors/options, so this baseline match remains a Production
-assumption and installation remains blocked pending owner
-architecture review and a fresh read-only Production recheck. Do not
-generalize to other paths or change Production grants to satisfy an installer. The
-[read-only membership review](../production-operations.md#owner-operated-read-only-production-preflight)
-and separate installation approval remain required; unexpected access or drift
-blocks installation.
+Database administrators and their credential delegates, Storage service principals, and project-trusted JWT signing authorities remain trusted infrastructure; this design does not isolate package data or publication from them. The manual installer checks application-role access, publisher grants and object collisions, not the internal Supabase administrator graph. Never issue service-role or database-admin credentials to the publisher CLI or browser. Production setup remains owner-operated and separately approved; see the [production runbook](../production-operations.md#production-publisher-checklist).
 
 **Preserved versions (D-027):** Every party keeps its exact pinned **published version and digest for its lifetime**, unaffected by new packages or Vercel releases. Corrections become new versions; do not mutate or upgrade existing parties, and do not fall back to latest if pinned object is missing. New parties can pin a newly approved version at creation. Retain published objects while referenced, including across deploy rollback, with durable object + database backup and restore, hash verification and schema compatibility checks. A missing/mismatched object fails closed with a safe unavailable response. Cache verified immutable package bytes only inside a trusted server, keyed by immutable version+digest; never cache user-specific authorization results across callers. For old application deployments unable to interpret a newer schema, prevent creating new parties using that schema until deployed code supports it, while existing party versions remain retrievable.
 
