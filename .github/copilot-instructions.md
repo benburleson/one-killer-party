@@ -29,17 +29,11 @@ Complete the assigned, well-scoped GitHub issue as a **reviewable PR** on an iso
 5. Submit a PR describing scope, actual commands and outcomes, limitations, screenshots/evidence when safe, migration/deployment gates, risks, and owner verification instructions. An old passing run does not validate a newer commit.
 6. Leave Production migration, Auth hook settings, SMTP/Turnstile configuration, Vercel releases, Keychain enrollment, and each package publication to a **separately authorized owner-operated step**.
 
-## Current security and product invariants
+## Source-of-truth security boundaries
 
-- The app implements **LOBBY only** (host login, guest join/recovery, public role assignment, polling). Do not invent dossier/act/reveal UI or assume those are deployed.
-- A private mystery package is immutable JSON validated and hashed canonically, stored in the `private-mystery-packages` bucket and registered under `private_mystery.published_versions`. **Only a synthetic package has been published in Production.** No real Blackwood story content belongs in this public repository.
-- The **enabled Production** Custom Access Token Hook maps one publisher UUID to `mystery_operator`. The server-side guarded publication RPC and restrictive Storage policy require current mapping and `aal2`. Operator sign-in requires Cloudflare Turnstile, TOTP and exact `PUBLISH` confirmation; do not bypass with service-role keys. App clients must not access the full private package.
-- Host and guest browser roles have no direct public-table privileges. Changes to tables/RPCs must preserve migration/RLS and `supabase/tests/security_invariants.test.sql` constraints. No anonymous or ordinary authenticated caller may inherit publisher capabilities.
-- Party mystery ID and version pins are immutable for existing parties. The existing Blackwood placeholder pin is public roster data; never quietly replace it with a private published version.
-- Preserve host/guest separation, owner-checked versions, origin and anti-CSRF guards, invite secrecy, and spoiler-safe public projections. Browser/client bundles, screenshots, logs and PR evidence must never leak private dossiers, solution, JWTs, passwords or user data.
-- Cloudflare Turnstile sitekey is public; secret belongs in Supabase Auth. Turnstile tokens are short-lived and single use. No Production secrets or databases in previews, CI or local fixtures.
-- On partial publication, preserve the object and inspect registry+digest; no automatic overwrite, deletion or party repinning. A real content release requires separate identity/digest-scoped approval.
-- Existing Production evidence: synthetic publication+registry/Storage metadata, unauthenticated Storage denial, host/guest login, publisher MFA. **An ordinary-host authenticated JWT Storage denial was not live-tested.** Do not claim otherwise.
+For implemented lobby authorization and data model consult [lobby persistence](../docs/architecture/lobby-persistence.md). For private mystery and version-pinning design consult [content architecture](../docs/architecture/mystery-content-architecture.md). Use [source code](../src/lib/) and [migrations](../supabase/migrations/) to verify executable behavior, and [Production operations](../docs/production-operations.md) for live status.
+
+Never expose complete private mystery packages to browsers. Keep credentials and private content out of commits and test reports. Preserve operator authentication, role grants, immutable version pins, server-side authorization, and current host/guest security boundaries. Production actions require separate approval.
 
 ## Common review traps
 
