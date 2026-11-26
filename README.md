@@ -29,32 +29,8 @@ Product specs distinguish **confirmed** requirements from proposals; no implemen
 
 ## Develop
 
-Preferred environment: [.devcontainer/devcontainer.json](.devcontainer/devcontainer.json) in VS Code Dev Containers or Codespaces (Node 22 and Chromium). Keep forwarded service ports private. See [development environments](docs/development-environments.md) for disposable Supabase configuration and callback/origin constraints.
-
-```sh
-npm ci
-npx supabase start
-npx supabase db reset --no-seed
-npx supabase test db
-npm run dev
-```
-
-Use local-only, uncommitted `.env.local` values pointing at the disposable Supabase stack. Do **not** run automated tests against Production.
-
-```sh
-npm run test:unit
-npm run lint
-npx tsc --noEmit
-npm run build
-npm run test:integration:mystery
-npm run test:integration:owner
-npm run test:e2e -- --project=desktop-chromium --project=mobile-chromium
-```
-
-Run local integration suites only with their documented disposable Auth/database prerequisites. GitHub CI uses [Copilot setup steps](.github/workflows/copilot-setup-steps.yml) and its own Linux runners, not your dev container.
+Use the [dev container](.devcontainer/devcontainer.json) or Codespaces, and follow [Development environments](docs/development-environments.md) for local Supabase setup, safe environment variables, build/test commands and troubleshooting. `package.json` defines the authoritative npm scripts; `supabase/config.toml` and migrations define the disposable database setup. Never point development tests at Production.
 
 ## Security and maintenance
 
-This is a public repository. Never commit mystery secrets, private player content, passwords, JWTs, service-role keys, TOTP setup keys or Production backups. New gameplay must expose only server-authorized, character-specific projections; storing a complete private package does **not** authorize disclosure. Production migrations, hooks, Keychain enrollment and publishing are owner-operated and separately approved.
-
-**Current limitations:** the Production rehearsal established public-anonymous Storage denial but did **not** make a live authenticated-host JWT download-denial test. The November 24 encrypted database backup predates publisher provisioning; take a new encrypted backup before the next substantial Production change. See the operations guide for full recovery limits and publication gates.
+This repository is public. Never commit private story content, player data, passwords, JWTs, MFA secrets, privileged Supabase credentials or Production backups. Code review, migrations, live Auth configuration and each mystery publication have separate approval gates. For procedures and current operational evidence, consult [Production operations](docs/production-operations.md); do not infer live status from source alone.
