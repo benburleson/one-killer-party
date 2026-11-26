@@ -265,27 +265,9 @@ enrollment, and `--target production --keychain` retrieves that credential
 for routine publishing. The CLI still requires the separate provisioning,
 preflight and rehearsal gates below before any live use.
 
-Production remains disabled until the owner completes this checklist after
-review and obtains separate approval:
-
-1. Verify the exact Production project, migration history, private bucket,
-   app-role checks above, immutable protections and existing Auth hook. Stop
-   on an existing hook or unexplained mismatch; verify backup and recovery.
-2. Provision the dedicated owner identity with MFA. From a trusted checkout
-   and independently verified `psql` target, run
-   `scripts/production-publisher-hook-review.sql`, add only the approved user
-   mapping, then configure the Auth hook through the supported Supabase
-   interface. The SQL entry point mutates the database; it never activates
-   Auth. Recheck grants and app-role denial, and rehearse with synthetic data.
-3. Roll back only with separate approval: stop publisher-role issuance, remove
-   the mapping and disable the hook, revoke Auth sessions, then wait for every
-   issued token to expire. Keep the guarded RPC and restrictive policy in
-   place until expiry. Only then reverse database changes and restore any
-   previous hook under its reviewed composition plan.
-
-Do not use Production credentials or publish real content in CI. Record only
-redacted evidence. The owner checklist does not authorize or perform any
-Production action by this PR.
+Production remains disabled. The owner-run setup, read-only check, rehearsal
+and rollback are summarized in the [Production publisher checklist](#owner-operated-production-publisher-checklist);
+this PR authorizes no Production action.
 
 #### macOS Keychain enrollment and use
 
@@ -514,14 +496,11 @@ tokens, upload/delete objects, or publish. Record redacted links and result
 timestamps; do not paste secret values, package bytes or object locators in
 GitHub.
 
-1. Select the exact Supabase project ID from the owner-controlled console and
-   independently confirm its Production label and expected Vercel project;
-   never infer target from a shell default or URL alone.
-2. Inspect remote migration history for both `20261123000000` and
-   `20261123010000`; compare against reviewed migration files. Record this as
-   independent verification (or report mismatch), separately from the
-   owner-reported application status above.
-3. Confirm the private bucket and publisher restriction, immutable object and
+1. Select the exact Supabase project from the owner-controlled console; confirm
+   its Production label, expected Vercel project and migrations
+   `20261123000000` and `20261123010000`. Inspect the current deployment and
+   Auth hook; never overwrite an existing hook. Verify backups and recovery.
+2. Confirm the private bucket and publisher restriction, immutable object and
    registry protections, exact RPC grants, and that browser roles cannot access
    publisher privileges. Database administrators, delegates, Storage service
    principals and trusted JWT signers are infrastructure trust boundaries;
@@ -541,23 +520,21 @@ GitHub.
 
    All rows must show `operator_member = false` and `can_publish = false`.
    Review the bucket, policy, RLS and trigger configuration read-only in the
-   dashboard or against the reviewed migrations. Repeat after installation.
+   dashboard or against the reviewed migrations.
    Never execute `scripts/production-publisher-hook-review.sql` as an inspection
    command; it mutates the database.
+3. Only after separate approval, provision the dedicated owner identity with
+   MFA, run the installer from a trusted checkout on the verified target, add
+   only the approved user mapping and configure the Auth hook. Keep service-role
+   credentials out of the CLI, CI and browser. Verify the app-role denials and
+   rehearse with synthetic content; record redacted results only.
+4. For rollback, stop role issuance, remove the mapping, disable the hook,
+   revoke Auth sessions and wait for every issued token to expire. Keep the
+   guarded RPC and restrictive policy until then; only afterward perform an
+   approved database reversal or restore a reviewed previous hook.
 
-4. Confirm service-role credentials are confined to the server runtime; no
-   publisher, GitHub Actions, Copilot, PR preview or public client receives
-   them. Record only yes/no and credential owner, not values. Confirm no
-   Production issuer/approval artifact is configured until its separate
-   decision is approved.
-5. Inspect current deployment SHA and verify it does not expose package data
-   through browser routes, RSC/client payloads, notifications or public
-   Storage. A trusted loader is not player authorization; M2.2 must separately
-   revalidate fresh party pin, member and assignment before an allowlisted
-   dossier projection.
-6. Review existing encrypted Postgres and object-backup inventory, access
-   separation, retention and latest restore evidence. A database-only backup
-   is insufficient. Stop and request owner decision if any item is unknown.
+The read-only query and setup commands above are operator guidance, not
+authorization. This PR performs no Production verification or changes.
 
 ### Backup, retention, recovery and orphan controls
 
