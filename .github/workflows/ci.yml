@@ -35,6 +35,11 @@ jobs:
         run: npx supabase db reset --no-seed
       - name: Run database security tests
         run: npx supabase test db
+      - name: Test delegated administrator guard on disposable managed roles
+        run: |
+          docker cp supabase/tests/production-publisher-hook-review.inc supabase_db_one-killer-party:/tmp/production-publisher-hook-review.inc
+          docker cp supabase/tests/production-publisher-delegation.test.sql supabase_db_one-killer-party:/tmp/production-publisher-delegation.test.sql
+          docker exec supabase_db_one-killer-party psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -v require_superuser=1 -f /tmp/production-publisher-delegation.test.sql
       - name: Test private mystery publication against local Supabase
         run: npm run test:integration:mystery
       - name: Stop local Supabase and remove volumes

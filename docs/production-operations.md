@@ -202,8 +202,10 @@ the development environment.
 Never give publisher operators `SUPABASE_SERVICE_ROLE_KEY` or the broad
 project JWT signing secret, and do not substitute a long-lived database
 credential. `service_role` still bypasses RLS and has broad Storage access;
-database owners/superusers can change grants, disable triggers or alter rows.
-No mechanism here claims isolation from those privileged credentials.
+privileged database administrators and their credential delegates can change
+grants, disable triggers or alter rows. Storage service principals and
+project-trusted JWT signing authorities also remain trusted. No mechanism here
+claims isolation from those privileged credentials.
 
 | Identity | Intended access | Important limit |
 | --- | --- | --- |
@@ -227,9 +229,12 @@ rehearses this workflow.
 
 ### Production publisher review artifact (M2.1f-a)
 
-**Code review is not activation.** The separately reviewed
-`scripts/production-publisher-hook-review.sql` is not a migration and does not
-enable an Auth hook or create a publisher identity. The local example below
+**Code review is not activation.** Despite its name,
+`scripts/production-publisher-hook-review.sql` is a **mutating manual
+installer**, not a read-only preflight or migration. Its preflight checks run
+before an included SQL source creates and changes database objects and grants;
+do not execute it for inspection. It does not enable an Auth hook or create a
+publisher identity. The local example below
 must never be used as a Production hook. The proposed artifact maps a single
 Auth UUID in a non-public table, preserves unrelated token claims, and adds a
 server-side `aal2` and current-mapping check to both private Storage access and
@@ -238,6 +243,21 @@ Production publishing remains blocked until the owner provisions the
 identity-backed, revocable MFA session and demonstrates the exact
 confirmation workflow in the approved rehearsal; this is owner approval, not
 an independent verifier.
+
+**Installation blocker:** local Supabase PostgreSQL 17.12 returned
+`pg_has_role(delegate, operator, 'SET') = false` for the exact synthetic graph
+with a `postgres` role and SET=false edge, contrary to the reported Production
+result. Disposable Supabase also has SET-enabled
+`postgres -> authenticator -> mystery_operator` grants alongside that direct
+edge; adding a synthetic delegate of `postgres` reproduced effective SET=true
+and USAGE=false. This is a candidate explanation, not a confirmed Production
+path. Investigate all actual paths, duplicate grants and role attributes
+without assuming the cause. The revised guard requires that exact trusted
+SET-enabled chain, the reviewed direct edges and options, and effective SET;
+it fails closed if any are absent or anomalous. Acceptance in a disposable
+database does not verify the Production path. Manual installation remains blocked
+pending owner architecture review and a fresh post-merge read-only Production
+recheck, followed by separate installation approval.
 
 The candidate configuration validator expects an explicitly selected
 `MYSTERY_PRODUCTION_PROJECT_REF`, matching
@@ -254,12 +274,14 @@ preflight and rehearsal gates below before any live use.
 
 Two independent gates remain:
 
-1. **Owner-run read-only Production preflight and security review.** Complete
-   the inspection below, compare existing grants, policies, functions and Auth
+1. **Owner-run read-only Production preflight and security review.** After
+   merge, repeat the inspection below against the independently verified target
+   and reviewed revision; compare existing grants, policies, functions and Auth
    hook configuration with the reviewed design, and stop on any mismatch or
    existing hook. An existing hook must not be overwritten; any composition
    requires its own review. Verify backup and recovery before requesting
-   authorization for changes.
+   separate, explicit authorization to install. Merge or a successful
+   read-only check is not installation approval.
 2. **Separately approved Production Auth provisioning and synthetic rehearsal.**
    Only after approval may the owner provision a dedicated user and TOTP,
    install and configure the reviewed boundary, and rehearse using synthetic
@@ -278,10 +300,13 @@ already issued elsewhere and privileged roles that bypass RLS. Confirm the
 denial in a disposable rehearsal; restoring the same UUID mapping can
 reactivate an unexpired token, so revoke sessions and wait out its lifetime
 before remapping. Do not assume disabling a hook invalidates existing JWTs.
-Before hook rollback, stop new issuance and remove the mapping;
-restore any prior hook only through a separately reviewed plan. Do not remove
-the MFA policies or restore the unguarded RPC while publisher tokens remain
-usable. Never weaken private-bucket immutability to resolve an orphan.
+Before hook rollback, stop new role issuance, remove the mapping, revoke Auth
+sessions and wait for all issued publisher tokens to expire; disabling the hook
+or revoking sessions alone does not invalidate already issued JWTs. Restore
+any prior hook only through a separately reviewed plan. Only then consider a
+separately approved database reversal; do not remove the MFA policies or
+restore the unguarded RPC while publisher tokens remain usable. Never weaken
+private-bucket immutability to resolve an orphan.
 
 After both gates and an explicit authorization for the change, the owner can
 install the reviewed SQL from a trusted checkout in an authenticated `psql`
@@ -299,9 +324,10 @@ not activate Auth. If the Auth custom-access-token hook is already configured,
 stop; do not overwrite it. After separate approval, select
 `private_mystery.production_publisher_hook` as the custom-access-token hook
 using the supported Supabase configuration interface and verify the resulting
-configuration. The installation is idempotent only in the absence of drift:
-on a repeat it does not repair modified objects. Inspect the objects and grants
-before and after installation, and stop on collisions or unexpected state.
+configuration. The entry-point preflight rejects existing installation objects
+for drift review; it is not a repair or repeat-install procedure. Inspect the
+objects and grants before and after installation, and stop on collisions or
+unexpected state.
 
 To revoke the publisher, the authorized owner can remove the mapping in the
 same independently verified database:
@@ -311,12 +337,12 @@ DELETE FROM private_mystery.production_publisher_identity
 WHERE user_id = '<APPROVED-PUBLISHER-AUTH-UUID>'::uuid;
 ```
 
-Confirm the old token is denied, revoke the Auth session, and rotate the
-credential. When rolling back, first remove the mapping and disable the
-publisher hook; restore a prior hook only if its exact configuration and
-composition have been reviewed. Leave the restrictive policy and guarded RPC
-in place until all old tokens have expired or are otherwise demonstrably
-ineffective. Removing those guards requires a separately reviewed database
+Confirm the old token is denied, revoke the Auth sessions, and rotate the
+credential. When rolling back, first stop role issuance, remove the mapping
+and disable the publisher hook, revoke sessions and wait out all issued token
+lifetimes. Restore a prior hook only if its exact configuration and composition
+have been reviewed. Leave the restrictive policy and guarded RPC in place
+until then. Removing those guards requires a separately approved database
 rollback and verification; simply disabling the hook is not a safe rollback.
 
 #### macOS Keychain enrollment and use
@@ -557,12 +583,12 @@ GitHub.
    table RLS/force-RLS, immutable triggers, the exact `publish_mystery_version`
    and `get_published_mystery` execute grants, and confirm no browser role can
    list/read package bytes. Inspect direct and transitive operator-role
-   membership: only `authenticator`, the trusted `supabase_storage_admin`
-   database service, and the explicitly trusted administrative roles allowed
-   by the reviewed artifact may assume it. Those database credentials can
-   forge claims; their custody is part of the trust boundary. Repeat this review
-   after installation because later role grants are not prevented by the
-   installer. Use read-only catalog/dashboard inspection only.
+   membership, effective privileges and the specific trusted administrative
+   delegation described below; do not treat a name alone as proof of trust.
+   Those database credentials can forge claims; their custody is part of the
+   trust boundary. Repeat this review after installation because later role
+   grants are not prevented by the installer. Use read-only catalog/dashboard
+   inspection only; the manual installer is not an inspection command.
    If using the SQL editor, run only read-only checks like the following and
    keep raw result rows in the owner's restricted audit system:
 
@@ -606,6 +632,103 @@ GitHub.
    )
    ORDER BY c.relname, t.tgname;
    ```
+
+   The owner observed these Production paths: `authenticator ->
+   mystery_operator`, `postgres -> mystery_operator`,
+   `supabase_storage_admin -> authenticator -> mystery_operator`, and
+   `cli_login_postgres -> postgres -> mystery_operator`. The last is a
+   specific managed administrative delegation: `cli_login_postgres` has LOGIN
+   and effective SET on `postgres`, which has BYPASSRLS and CREATEROLE.
+   `supabase_admin` is a superuser; `mystery_operator` is NOLOGIN, NOINHERIT
+   and lacks privileged flags. The `cli_login_postgres -> postgres` grant had
+   SET=true, INHERIT=false; `postgres -> mystery_operator` had SET=false,
+   INHERIT=false. Nevertheless the owner observed effective SET=true and
+   USAGE=false for `cli_login_postgres` on `mystery_operator`, and SET=true
+   for `authenticator` on `mystery_operator`. The local PostgreSQL 17.12
+   synthetic result above differs from the reported effective SET result; the
+   locally reproduced alternate chain is a candidate, not confirmed in
+   Production. Investigate all alternate paths, duplicate grants and the
+   actual role graph. The reason is not established, and USAGE=false does not
+   prove absence of effective SET. Treat the delegate as trusted, not harmless.
+   This observation does not authorize other paths or changing grants.
+
+   For PostgreSQL versions exposing `pg_auth_members.set_option` and
+   `inherit_option`, the following read-only catalog checks enumerate inbound
+   paths (including cycles), each path's grant rows and grantors, flags and
+   effective SET/USAGE.
+   Named rows also expose missing or disconnected expected roles. The second
+   query checks roles granted *to* `mystery_operator`, which inbound traversal
+   alone cannot reveal. Run with sufficient catalog visibility; an error,
+   missing role, incomplete visibility or unsupported catalog is a blocker,
+   not a reason to omit a check. Save raw results only in restricted audit.
+
+   ```sql
+   WITH RECURSIVE paths(role_oid, path_oids, path, grants, cycle) AS (
+     SELECT r.oid, ARRAY[r.oid], r.rolname::text, '[]'::jsonb, false
+     FROM pg_catalog.pg_roles AS r
+     WHERE r.rolname = 'mystery_operator'
+     UNION ALL
+     SELECT member.oid, p.path_oids || member.oid,
+            member.rolname::text || ' -> ' || p.path,
+            pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+              'member', member.rolname, 'role', granted.rolname,
+              'set', m.set_option, 'inherit', m.inherit_option,
+              'admin', m.admin_option,
+              'grantor', pg_catalog.pg_get_userbyid(m.grantor)
+            )) || p.grants,
+            member.oid = ANY(p.path_oids)
+     FROM paths AS p
+     JOIN pg_catalog.pg_auth_members AS m ON m.roleid = p.role_oid
+     JOIN pg_catalog.pg_roles AS member ON member.oid = m.member
+     JOIN pg_catalog.pg_roles AS granted ON granted.oid = m.roleid
+     WHERE NOT p.cycle
+   ), candidates AS (
+     SELECT 'path'::text AS kind, role_oid, NULL::text AS expected_name,
+            path, grants, cycle FROM paths
+     UNION ALL
+     SELECT 'expected', r.oid, expected.name, NULL::text, NULL::jsonb, false
+     FROM (VALUES ('mystery_operator'), ('authenticator'),
+                  ('supabase_storage_admin'), ('postgres'),
+                  ('supabase_admin'), ('cli_login_postgres')) AS expected(name)
+     LEFT JOIN pg_catalog.pg_roles AS r ON r.rolname = expected.name
+   )
+   SELECT c.kind, c.expected_name, c.path, c.grants, c.cycle,
+          r.rolname, r.rolcanlogin, r.rolinherit, r.rolsuper,
+          r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication,
+          CASE WHEN r.oid IS NOT NULL AND op_role.oid IS NOT NULL
+            THEN pg_catalog.pg_has_role(r.oid, op_role.oid, 'SET') END AS operator_set,
+          CASE WHEN r.oid IS NOT NULL AND op_role.oid IS NOT NULL
+            THEN pg_catalog.pg_has_role(r.oid, op_role.oid, 'USAGE') END AS operator_usage,
+          CASE WHEN r.oid IS NOT NULL AND admin.oid IS NOT NULL
+            THEN pg_catalog.pg_has_role(r.oid, admin.oid, 'SET') END AS postgres_set,
+          CASE WHEN r.oid IS NOT NULL AND admin.oid IS NOT NULL
+            THEN pg_catalog.pg_has_role(r.oid, admin.oid, 'USAGE') END AS postgres_usage
+   FROM candidates AS c
+   LEFT JOIN pg_catalog.pg_roles AS r ON r.oid = c.role_oid
+   LEFT JOIN pg_catalog.pg_roles AS op_role ON op_role.rolname = 'mystery_operator'
+   LEFT JOIN pg_catalog.pg_roles AS admin ON admin.rolname = 'postgres'
+   ORDER BY c.kind, c.expected_name, c.path;
+
+   SELECT granted.rolname AS role_granted_to_operator,
+          m.set_option, m.inherit_option, m.admin_option,
+          pg_catalog.pg_get_userbyid(m.grantor) AS grantor
+   FROM pg_catalog.pg_auth_members AS m
+   JOIN pg_catalog.pg_roles AS member ON member.oid = m.member
+   JOIN pg_catalog.pg_roles AS granted ON granted.oid = m.roleid
+   WHERE member.rolname = 'mystery_operator'
+   ORDER BY granted.rolname;
+   ```
+
+   Compare every path, per-grant option, role flag and effective privilege with
+   the reviewed design and the fresh target's approved baseline. Stop on any
+   unexpected member, cycle, grant, flag, effective access, missing trusted
+   path or other anomaly; investigate and obtain security review rather than
+   broadening an allowlist or altering managed grants. The previously observed
+   `cli_login_postgres` path was rejected by the then-current recursive
+   name-based installer guard; observation alone does not make that guard
+   accept it. Installation remains blocked until owner architecture review and
+   the post-merge read-only recheck resolve the discrepancy. Verify the merged
+   artifact and tests explicitly before seeking separate installation approval.
 
 4. Confirm service-role credentials are confined to the server runtime; no
    publisher, GitHub Actions, Copilot, PR preview or public client receives

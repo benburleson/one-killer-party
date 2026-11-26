@@ -31,12 +31,52 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles
     WHERE rolname = 'mystery_operator'
-      AND NOT (rolsuper OR rolbypassrls OR rolcanlogin OR rolinherit)
+      AND NOT (rolsuper OR rolbypassrls OR rolcanlogin OR rolinherit
+               OR rolcreaterole OR rolcreatedb OR rolreplication)
   ) OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_auth_members
     WHERE member = 'mystery_operator'::regrole
   ) THEN
     RAISE EXCEPTION 'operator role has unsafe attributes or memberships';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'cli_login_postgres') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_roles
+      WHERE rolname = 'cli_login_postgres' AND rolcanlogin
+        AND NOT (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb
+                 OR rolreplication OR rolinherit)
+    ) OR NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_roles
+      WHERE rolname = 'postgres' AND rolcanlogin AND rolbypassrls
+        AND rolcreaterole AND rolcreatedb AND rolinherit AND NOT rolsuper
+    ) OR NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_auth_members
+      WHERE member = 'cli_login_postgres'::regrole AND roleid = 'postgres'::regrole
+        AND set_option AND NOT inherit_option
+    ) OR EXISTS (
+      SELECT 1 FROM pg_catalog.pg_auth_members
+      WHERE member = 'cli_login_postgres'::regrole AND roleid = 'postgres'::regrole
+        AND (NOT set_option OR inherit_option)
+    ) OR NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_auth_members
+      WHERE member = 'postgres'::regrole AND roleid = 'mystery_operator'::regrole
+        AND NOT set_option AND NOT inherit_option
+    ) OR EXISTS (
+      SELECT 1 FROM pg_catalog.pg_auth_members
+      WHERE member = 'postgres'::regrole AND roleid = 'mystery_operator'::regrole
+        AND (set_option OR inherit_option)
+    ) OR NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_auth_members
+      WHERE member = 'postgres'::regrole AND roleid = 'authenticator'::regrole AND set_option
+    ) OR NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_auth_members
+      WHERE member = 'authenticator'::regrole AND roleid = 'mystery_operator'::regrole AND set_option
+    ) OR NOT pg_catalog.pg_has_role('cli_login_postgres', 'postgres', 'SET')
+      OR NOT pg_catalog.pg_has_role('cli_login_postgres', 'mystery_operator', 'SET')
+      OR pg_catalog.pg_has_role('cli_login_postgres', 'mystery_operator', 'USAGE') THEN
+      RAISE EXCEPTION USING ERRCODE = '42501',
+        MESSAGE = 'unverified delegated postgres administrator path';
+    END IF;
   END IF;
   IF EXISTS (
     WITH RECURSIVE inbound(role_oid) AS (
@@ -53,6 +93,13 @@ BEGIN
       role.rolname IN ('authenticator', 'supabase_storage_admin')
       OR (role.rolname IN ('postgres', 'supabase_admin')
           AND (role.rolsuper OR role.rolbypassrls))
+      OR (role.rolname = 'cli_login_postgres' AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_auth_members AS membership
+        WHERE membership.member = role.oid
+          AND membership.roleid <> 'postgres'::regrole
+          AND (membership.roleid = 'mystery_operator'::regrole
+               OR membership.roleid IN (SELECT role_oid FROM inbound))
+      ))
     )
   ) THEN
     RAISE EXCEPTION USING ERRCODE = '42501',
