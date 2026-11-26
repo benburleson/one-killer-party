@@ -1,5 +1,7 @@
--- REVIEW ONLY: psql entry point for the manual, non-migration SQL artifact.
--- The single SQL source is shared with the disposable database tests.
+-- MANUAL INSTALLER: executing this psql entry point mutates the database.
+-- It is not a read-only preflight or a migration; review without executing it.
+-- Run only after a separate installation approval and backup, against the
+-- independently verified target. The SQL source is shared with disposable tests.
 \set ON_ERROR_STOP on
 DO $preflight$
 DECLARE

@@ -5,20 +5,13 @@
 -- owners, service_role (BYPASSRLS), and JWT signing authorities remain trusted.
 -- Do not enable this hook over an existing Auth hook without a reviewed composition.
 -- Re-running is a no-op, not a drift repair: inspect installed objects before use.
--- Only authenticator, the trusted Storage database service
--- (supabase_storage_admin), and trusted postgres/supabase_admin administrators
--- may be direct or indirect members of mystery_operator. These database
--- credentials can assume the role and forge claims, so they remain trusted.
--- Recheck memberships continuously: later grants are not prevented here.
+-- Supabase database administrators and their delegates are trusted infrastructure.
+-- The guard checks application-role boundaries, publisher grants and collisions;
+-- it does not certify the internal managed-administrator role graph.
 -- Re-adding the same user can reactivate an unexpired token; revoke provider
 -- sessions as well and wait for token expiry before re-enabling that identity.
--- Rollback is privileged and must first stop role issuance and revoke/wait out
--- all operator tokens: removing the guard otherwise restores their access.
--- After disabling this hook and reviewing dependencies, in one transaction:
--- drop the public wrapper, move the private original back to public and restore
--- its mystery_operator EXECUTE grant; drop the restrictive policy, hook and
--- helper, then the identity and install tables. Review any schema USAGE grants
--- and other Auth hooks before changing them. Back up/audit the mapping first.
+-- Rollback must first stop role issuance, revoke sessions and wait for all
+-- publisher tokens to expire before restoring the unguarded registration RPC.
 
 DO $install$
 BEGIN
@@ -31,7 +24,8 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles
     WHERE rolname = 'mystery_operator'
-      AND NOT (rolsuper OR rolbypassrls OR rolcanlogin OR rolinherit)
+      AND NOT (rolsuper OR rolbypassrls OR rolcanlogin OR rolinherit
+               OR rolcreaterole OR rolcreatedb OR rolreplication)
   ) OR EXISTS (
     SELECT 1 FROM pg_catalog.pg_auth_members
     WHERE member = 'mystery_operator'::regrole
@@ -39,24 +33,15 @@ BEGIN
     RAISE EXCEPTION 'operator role has unsafe attributes or memberships';
   END IF;
   IF EXISTS (
-    WITH RECURSIVE inbound(role_oid) AS (
-      SELECT member FROM pg_catalog.pg_auth_members
-      WHERE roleid = 'mystery_operator'::regrole
-      UNION
-      SELECT membership.member
-      FROM pg_catalog.pg_auth_members AS membership
-      JOIN inbound ON membership.roleid = inbound.role_oid
-    )
-    SELECT 1 FROM inbound
-    JOIN pg_catalog.pg_roles AS role ON role.oid = inbound.role_oid
-    WHERE NOT (
-      role.rolname IN ('authenticator', 'supabase_storage_admin')
-      OR (role.rolname IN ('postgres', 'supabase_admin')
-          AND (role.rolsuper OR role.rolbypassrls))
+    SELECT 1
+    FROM (VALUES ('anon'::name), ('authenticated'::name), ('service_role'::name))
+      AS application_roles(rolname)
+    WHERE pg_catalog.pg_has_role(
+      application_roles.rolname, 'mystery_operator'::name, 'MEMBER'
     )
   ) THEN
     RAISE EXCEPTION USING ERRCODE = '42501',
-      MESSAGE = 'unauthorized direct or indirect mystery_operator member';
+      MESSAGE = 'application roles must not inherit publisher access';
   END IF;
 
   IF pg_catalog.to_regclass('private_mystery.production_publisher_install') IS NOT NULL THEN

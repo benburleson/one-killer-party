@@ -38,20 +38,39 @@ SELECT ok(
   'baseline registry has its owned primary-key dependency'
 );
 
-CREATE ROLE synthetic_direct_operator_member NOLOGIN;
-GRANT mystery_operator TO synthetic_direct_operator_member;
-SAVEPOINT direct_member_check;
+SAVEPOINT authenticated_member_check;
 -- The installer must fail here; capture its SQLSTATE before recovering.
+GRANT mystery_operator TO authenticated;
 \set ON_ERROR_STOP off
 \ir production-publisher-hook-review.inc
-\set direct_member_sqlstate :SQLSTATE
+\set authenticated_member_sqlstate :SQLSTATE
 \set ON_ERROR_STOP on
-ROLLBACK TO SAVEPOINT direct_member_check;
-SELECT is(:'direct_member_sqlstate'::text, '42501'::text, 'direct untrusted role membership blocks installation');
+ROLLBACK TO SAVEPOINT authenticated_member_check;
+SELECT is(:'authenticated_member_sqlstate'::text, '42501'::text,
+  'authenticated clients cannot inherit publisher role access');
 SELECT ok(pg_catalog.to_regclass('private_mystery.production_publisher_install') IS NULL,
   'rejected installation leaves no installation marker');
-REVOKE mystery_operator FROM synthetic_direct_operator_member;
-DROP ROLE synthetic_direct_operator_member;
+
+SAVEPOINT service_role_member_check;
+GRANT mystery_operator TO service_role;
+\set ON_ERROR_STOP off
+\ir production-publisher-hook-review.inc
+\set service_role_member_sqlstate :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT service_role_member_check;
+SELECT is(:'service_role_member_sqlstate'::text, '42501'::text,
+  'service role cannot inherit the publisher application grant');
+
+SAVEPOINT unexpected_rpc_grant_check;
+GRANT EXECUTE ON FUNCTION public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)
+  TO authenticated;
+\set ON_ERROR_STOP off
+\ir production-publisher-hook-review.inc
+\set unexpected_rpc_grant_sqlstate :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT unexpected_rpc_grant_check;
+SELECT is(:'unexpected_rpc_grant_sqlstate'::text, 'P0001'::text,
+  'unexpected browser RPC grant blocks installation');
 
 \ir production-publisher-hook-review.inc
 \ir production-publisher-hook-review.inc
@@ -98,25 +117,22 @@ SELECT ok(
     'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)', 'EXECUTE'),
   'installed publisher grants are exact at the trust boundaries'
 );
-CREATE ROLE synthetic_operator_bridge NOLOGIN;
-CREATE ROLE synthetic_indirect_operator_member NOLOGIN;
-GRANT mystery_operator TO synthetic_operator_bridge;
-GRANT synthetic_operator_bridge TO synthetic_indirect_operator_member;
-SELECT ok(pg_catalog.pg_has_role('synthetic_indirect_operator_member', 'mystery_operator', 'MEMBER'),
-  'synthetic indirect member reaches operator through a role bridge');
+CREATE ROLE synthetic_authenticated_bridge NOLOGIN;
+GRANT mystery_operator TO synthetic_authenticated_bridge;
+GRANT synthetic_authenticated_bridge TO authenticated;
+SELECT ok(pg_catalog.pg_has_role('authenticated', 'mystery_operator', 'MEMBER'),
+  'authenticated role reaches publisher through an indirect membership');
 SAVEPOINT indirect_member_check;
--- Both the untrusted bridge and its indirect member must be rejected.
 \set ON_ERROR_STOP off
 \ir production-publisher-hook-review.inc
 \set indirect_member_sqlstate :SQLSTATE
 \set ON_ERROR_STOP on
 ROLLBACK TO SAVEPOINT indirect_member_check;
 SELECT is(:'indirect_member_sqlstate'::text, '42501'::text,
-  'transitive untrusted role membership blocks repeat installation');
-REVOKE synthetic_operator_bridge FROM synthetic_indirect_operator_member;
-REVOKE mystery_operator FROM synthetic_operator_bridge;
-DROP ROLE synthetic_indirect_operator_member;
-DROP ROLE synthetic_operator_bridge;
+  'transitive authenticated membership blocks repeat installation');
+REVOKE synthetic_authenticated_bridge FROM authenticated;
+REVOKE mystery_operator FROM synthetic_authenticated_bridge;
+DROP ROLE synthetic_authenticated_bridge;
 
 INSERT INTO auth.users (id, aud, role, email, is_anonymous) VALUES
   ('00000000-0000-4000-8000-000000000901', 'authenticated', 'authenticated', 'publisher-synthetic@test.invalid', false),
