@@ -69,7 +69,7 @@ GRANT EXECUTE ON FUNCTION public.publish_mystery_version(text,text,integer,text,
 \set unexpected_rpc_grant_sqlstate :SQLSTATE
 \set ON_ERROR_STOP on
 ROLLBACK TO SAVEPOINT unexpected_rpc_grant_check;
-SELECT is(:'unexpected_rpc_grant_sqlstate'::text, '42501'::text,
+SELECT is(:'unexpected_rpc_grant_sqlstate'::text, 'P0001'::text,
   'unexpected browser RPC grant blocks installation');
 
 \ir production-publisher-hook-review.inc

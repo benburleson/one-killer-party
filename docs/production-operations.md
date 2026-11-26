@@ -530,7 +530,7 @@ GitHub.
 
    ```sql
    SELECT role_name,
-          pg_catalog.pg_has_role(role_name, 'mystery_operator', 'MEMBER') AS operator_member,
+          pg_catalog.pg_has_role(role_name::name, 'mystery_operator'::name, 'MEMBER') AS operator_member,
           pg_catalog.has_function_privilege(
             role_name,
             'public.publish_mystery_version(text,text,integer,text,text,text,text,text,text)',
