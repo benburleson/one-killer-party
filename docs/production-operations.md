@@ -296,8 +296,10 @@ account. The second retrieves it, signs in afresh, prompts for TOTP and requires
 `PUBLISH` for the displayed package. Passwords may include spaces, punctuation
 and Unicode, up to 1024 UTF-8 bytes. Control characters (including newlines)
 are unsupported; Enter submits the hidden prompt, so do not paste a multiline
-password. Invalid input is rejected locally and is not truncated. This is not
-an Auth password-policy change.
+password. A terminal cannot distinguish Enter from a pasted newline at a
+chunk boundary: such a paste can submit a prefix and expose subsequent input
+after the prompt closes. Use only a single-line password. Detected invalid
+input is rejected locally. This is not an Auth password-policy change.
 
 The CLI stores a versioned, unpadded base64url representation of the UTF-8
 password. This reversible encoding is **not encryption**; treat the Keychain

@@ -644,6 +644,18 @@ test("hidden prompt handles unicode, cancellation, EOF, length limits and timeou
   invalid.emit("data", Buffer.from("abc\u001bdef\r"));
   await assert.rejects(invalidPrompt, /KEYCHAIN_PASSWORD_FORMAT/);
   assert.equal(invalid.raw, false);
+  for (const chunk of [Buffer.from("first\nsecond\r"), Buffer.from([0x61, 0xff, 0x62, 0x0d]),
+    Buffer.from([0x61, 0xc3, 0x0d])]) {
+    const input = fakeInput();
+    const prompt = passwordPrompt(input, { write: () => {} }, undefined, { rejectInvalid: true });
+    input.emit("data", chunk);
+    await assert.rejects(prompt, /KEYCHAIN_PASSWORD_FORMAT/);
+    assert.equal(input.raw, false);
+  }
+  const strictUnicode = fakeInput();
+  const strictPrompt = passwordPrompt(strictUnicode, { write: () => {} }, undefined, { rejectInvalid: true });
+  for (const byte of Buffer.from("雪🐈\r")) strictUnicode.emit("data", Buffer.from([byte]));
+  assert.equal(await strictPrompt, "雪🐈");
   const timeout = fakeInput();
   let timedOutput = "";
   let settled = false;

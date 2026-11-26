@@ -250,6 +250,7 @@ export function passwordPrompt(input, output, label = "Publisher password",
   return new Promise((resolve, reject) => {
     let password = "";
     const decoder = new StringDecoder("utf8");
+    let strictDecoder = new TextDecoder("utf-8", { fatal: true });
     let invalid = false;
     let expired = false;
     let timer;
@@ -268,9 +269,26 @@ export function passwordPrompt(input, output, label = "Publisher password",
     };
     const onEnd = () => finish(null);
     const onData = (chunk) => {
-      for (const char of decoder.write(chunk)) {
+      let text = "";
+      if (rejectInvalid) {
+        for (const byte of chunk) {
+          try {
+            text += strictDecoder.decode(Uint8Array.of(byte), { stream: true });
+          } catch {
+            invalid = true;
+            strictDecoder = new TextDecoder("utf-8", { fatal: true });
+            if (byte < 0x80) text += String.fromCharCode(byte);
+          }
+        }
+      } else {
+        text = decoder.write(chunk);
+      }
+      const characters = Array.from(text);
+      for (let i = 0; i < characters.length; i++) {
+        const char = characters[i];
         if (char === "\u0003" || char === "\u0004") return finish(null);
         if (char === "\r" || char === "\n") {
+          if (rejectInvalid && i + 1 < characters.length) invalid = true;
           return finish(invalid || expired ? null : password, rejectInvalid && invalid && !expired);
         }
         if (char === "\u007f" || char === "\b") password = Array.from(password).slice(0, -1).join("");
