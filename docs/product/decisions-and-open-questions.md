@@ -47,6 +47,12 @@ For every scope-bearing issue/PR, reference relevant decision IDs and acceptance
 | `D-027` | **Every existing party keeps its immutable published mystery version.** Later publications affect new parties, never silently rewrite or upgrade existing ones. The original public-roster placeholder is not a published private version; keep its lobby functional but require a separately created party for content-backed gameplay. Missing/invalid pinned content fails closed. | Owner choice 2026-11-22, in [ADR](../architecture/mystery-content-architecture.md) |
 | `D-028` | The assigned murderer receives **only a spoiler-safe pre-start private dossier** in LOBBY and learns guilt, motive, method, crime timeline and cover story **when the host starts ACT_1**, via a separately gated role-only briefing. This refines D-023 (pre-start dossier) without delaying ordinary starting biography. | Owner choice 2026-11-22; resolves killer-knowledge timing noted in player flows |
 | `D-029` | **Single-owner publication approval uses an MFA-authenticated session plus exact interactive confirmation** bound to the target, project, package identity, canonical digest and rule set. No independent approval service or second human is required. Production remains disabled until owner provisioning and a synthetic rehearsal; the owner session, MFA device and privileged Supabase administrators remain trusted limitations. | Owner decision comment 7140131235, 2026-11-24; activation gates remain operational requirements |
+| `D-030` | Database-backed active-version pointer; publishing does not activate a package. Owner-controlled activation affects new parties only. | Owner approval 2026-11-26; [M2.2 architecture](../architecture/mystery-content-architecture.md) |
+| `D-031` | Continue legacy lobby creation until an active version exists; existing legacy pins remain immutable. | Owner approval 2026-11-26; unavailable or invalid active content fails closed |
+| `D-032` | Assigned participants may read their own starting dossier immediately in a published-content lobby. | Owner approval 2026-11-26; D-028 remains unchanged |
+| `D-033` | Pre-start reassignment remains allowed with warning about previously disclosed private information; no dossier-read lock. | Owner approval 2026-11-26; D-025 remains in force |
+| `D-034` | Maintain future real Blackwood content in a separate private GitHub repository. | Owner approval 2026-11-26; O-033 remains open |
+| `D-035` | M2.2 engineering completion uses synthetic content; real Blackwood publication is separate. | Owner approval 2026-11-26; no Production action authorized |
 
 **Caution on D-011–D-013:** They are stable, repeatedly stated design requirements, but specific UI details, automatic gates and exact schema remain proposals/open items.
 
@@ -181,8 +187,8 @@ The priority 0 and first two priority 1 rows (environment check, auth/recovery A
 | 0 | Auth/guest recovery ADR | Resolve `O-001`, `O-002`, `O-003`, `O-004`, `O-005` enough for lobby |
 | 1 | Party creation and basic lobby | Host creates + guest joins securely; no solution data in responses |
 | 1 | Character assignment with public-only host roster | Unique assignments, safe projections, race-condition tests |
-| 1 | Game state engine and release contract | Versioned transitions, public/private visibility tests |
-| 2 | Player dossiers and current act/clue UI | Respect unlock schedule and typed evidence/knowledge |
+| 1 | M2.2 published parties and private starting dossiers | [Approved M2.2 sequence](../architecture/mystery-content-architecture.md), synthetic validation |
+| 2 | Game state engine and release contract | Versioned transitions, public/private visibility tests |
 | 2 | Accusation/reveal decision & implementation | Resolve `O-017`–`O-019`; test reveal gate |
 | 2 | Blackwood content editorial pass | Resolve `O-009`–`O-016`; review canonical story and complete objective matrix |
 | 3 | Eight-person real-world playtest | Record observed engagement, fairness, usability and revised content decision |

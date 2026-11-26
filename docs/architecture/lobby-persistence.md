@@ -325,3 +325,8 @@ Reviewers should confirm:
   recovery credentials are hashed, expiring, single-use and audited.
 - [ ] Trusted RPC grants, host checks, and safe response projections are
   reviewed independently of browser-side authorization.
+
+
+## Approved M2.2 extension (not implemented)
+
+The [M2.2 architecture](mystery-content-architecture.md#m22--approved-private-dossier-delivery-2026-11-26) specifies the active published-version pointer, exact immutable party pin, transactional creation and public roster projection changes, capacity and assignment compatibility, and participant-only dossier authorization. Existing schema and commands above describe implemented behavior until the corresponding migrations and services land. No authored text is persisted in lobby tables.

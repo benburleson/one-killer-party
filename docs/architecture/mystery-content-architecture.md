@@ -167,7 +167,36 @@ or error/log/artifact output; use desktop and mobile isolated host/guest browser
 contexts and disposable Supabase. Scans support but do not replace review of
 serialization/import boundaries.
 
-## Editorial gates and proposed implementation slices
+## M2.2 — Approved private dossier delivery (2026-11-26)
+
+**Design approved; not implemented.** D-030–D-035 in the [decision register](../product/decisions-and-open-questions.md) govern this slice. M2.2 remains LOBBY-only.
+
+### Published party creation
+
+Use a restricted database-backed singleton active-version pointer for the first mystery experience. Publication and activation are separate owner-approved operations: a published test package is not automatically eligible for ordinary Production party creation. Activation references the complete immutable registry key and is permitted only for a verified, supported, explicitly approved package. No host/guest/browser activation API or runtime service-role activation grant; use a narrow owner-controlled operational path with exact target and reference verification. Local/CI may activate synthetic packages in disposable environments.
+
+An explicitly absent active pointer permits legacy lobby creation; lookup errors, malformed pointers, missing objects or integrity failures must fail closed, never silently create a placeholder. Existing legacy parties retain their original pin and public functionality. New published parties pin mystery ID, version, schema version and digest, with an exact registry foreign key and immutable pin protection. Null schema/digest are allowed only together for the exact legacy pin. Activation changes affect new parties only.
+
+The server verifies the active package and constructs a public roster projection. In the creation transaction, validate that the selected active reference is still current (including the absent-pointer case), persist the pin, register verified playable character IDs and create the invitation atomically. Serialize activation and creation or use equivalent atomic compare-and-retry semantics. A same-host idempotent creation retry returns the existing party before resolving current activation or loading content; never repin, regenerate its invitation or disclose another host's party. Preserve collision handling. If activation changes mid-create, safely retry or report unavailable. The server is trusted to supply IDs from the verified package; browser input is not authoritative.
+
+Adapt all placeholder-specific reads, assignment restrictions and capacity checks, including guest join and explicit host enrollment, to the supported eight-role rule set. Preserve uniqueness, registered-character foreign keys, version checks and existing lobby behavior. Resolve public labels from the exact pinned package, not the active pointer. Legacy catalog is only for the exact legacy pin. Do not persist authored text in runtime tables.
+
+### Dossier delivery
+
+Reuse the trusted loader and separate server-only allowlisted response types. Verify the current Auth principal and obtain a party-scoped membership/assignment/phase/pin snapshot from a service-only read. Require an enrolled assigned participant in LOBBY with a published pin. After asynchronous package verification, repeat authorization and compare the relevant snapshot (including party version to detect intervening changes); deny or retry safely on mismatch. No character ID supplied by the caller selects private content. A playing host uses this same participant path. Host operations never contain private dossiers.
+
+Construct only the assigned public identity, starting biography, relationship perspectives with public labels and interpersonal prompts; never spread the full definition or branch on murderer identity. No act items, objectives, briefing, solution, private object locator or registry metadata in browser responses. Fetch on deliberate My Character open, not in lobby polling or prefetch. No persistent package cache in this slice; all personalized delivery is private/no-store and dynamic. Reuse existing polling for invalidation, discard late responses, clear private view on authorization/assignment changes and revalidate on foreground/reconnect/back navigation. Do not retain offline dossier access. Reassignment and removal remain permitted with a warning that previously read secrets cannot be recalled. Recovery rebinds the same participant and assignment; old principal loses subsequent reads even with a valid JWT. No read receipts or additional readiness state.
+
+### Delivery sequence and acceptance
+
+1. Published-party creation and activation, immutable pins, public projections and legacy regressions.
+2. Server-only authorized dossier service, including race and negative tests.
+3. Player/playing-host UI and lifecycle reconciliation.
+4. Production-build browser isolation, serialization, cache and end-to-end milestone validation.
+
+Each slice includes its own security tests and independent CI; the last slice supplements rather than substitutes for those tests. Use distinct synthetic sentinels for each dossier and every unreleased content class. Assert both authorized content presence and unauthorized absence, including murderer in LOBBY. No game start or later phase implementation. Engineering completion uses synthetic content and disposable local/CI services; real Blackwood editorial completion, publication and activation are separate owner-approved work. Maintain real authored packages in a separate private GitHub repository, never a public build dependency. Existing public spoiler history remains O-033. No Production migration, activation or publication is authorized by this decision.
+
+## Editorial gates and implementation roadmap
 
 The [Blackwood draft](../product/blackwood-affair.md) contains draft, not
 automatically approved canon. Resolve **O-009–O-016**: chronology and Act I
@@ -189,11 +218,7 @@ by this ADR. Owner decisions D-026–D-028 settle private future content, preser
    placeholder compatibility. M2.2 remains responsible for fresh party/member/
    assignment authorization and allowlisted own-dossier projections. It must
    not expose full packages through host operations, logs, bundles or responses.
-2. **Own pre-start dossier:** After editorial approval of spoiler-safe starting content, add server reads and UI for assigned participants only,
-   including playing host. Add necessary version/digest and authorization RPC
-   migration, not content in public SQL seeds. Acceptance: D-023, cross-role,
-   host isolation, removal/recovery/stale-JWT and cache tests pass on disposable
-   local Supabase and desktop/mobile Playwright. No start-game behavior.
+2. **Own pre-start dossier (M2.2):** Follow the approved M2.2 sequence above. Real editorial approval is a separate publication gate, not an engineering dependency.
 3. **Start and Act I:** After readiness and Act I content approval, extend
    `LOBBY`-only schema with reviewed phase/release state and atomic idempotent
    host transition. Proposed minimum readiness: eight distinct current enrolled
