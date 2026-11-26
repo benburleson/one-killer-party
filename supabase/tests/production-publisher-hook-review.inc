@@ -7,8 +7,9 @@
 -- Re-running is a no-op, not a drift repair: inspect installed objects before use.
 -- Only authenticator, the trusted Storage database service
 -- (supabase_storage_admin), and trusted postgres/supabase_admin administrators
--- may be direct or indirect members of mystery_operator. These database
--- credentials can assume the role and forge claims, so they remain trusted.
+-- may be direct or indirect members of mystery_operator, except for the
+-- explicitly checked cli_login_postgres delegation to postgres below. These
+-- database credentials can assume the role and forge claims, so remain trusted.
 -- Recheck memberships continuously: later grants are not prevented here.
 -- Re-adding the same user can reactivate an unexpired token; revoke provider
 -- sessions as well and wait for token expiry before re-enabling that identity.
