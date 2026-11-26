@@ -10,6 +10,8 @@ type TurnstileApi = {
 };
 declare global { interface Window { turnstile?: TurnstileApi } }
 
+export const turnstileSitekey = process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY || "0x4AAAAAAGNYu6Zb0_5s2c2h";
+
 /** Render a token for Supabase Auth to validate. Do not verify it again. */
 export function TurnstileWidget({
   action, pending, onVerifiedChange,
@@ -22,7 +24,7 @@ export function TurnstileWidget({
   const widgetId = useRef<string | null>(null);
   const previousPending = useRef(false);
   const [token, setToken] = useState("");
-  const sitekey = process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY || "0x4AAAAAAGNYu6Zb0_5s2c2h";
+  const sitekey = turnstileSitekey;
 
   const invalidate = useCallback(() => {
     setToken("");

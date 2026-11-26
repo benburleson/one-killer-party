@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { approvalFor, authenticate, createKeychain, localConfiguration, parseArguments, productionConfiguration, publicationStore, publish, readPackage, verifyIdentity, verifyProductionIdentity } from "../../scripts/mystery-publish.mjs";
+import { EventEmitter } from "node:events";
+import { approvalFor, authenticate, checkTotpTerminal, createKeychain, localConfiguration, parseArguments, passwordPrompt, productionConfiguration, publicationStore, publish, readPackage, showTotpSecret, verifyIdentity, verifyProductionIdentity } from "../../scripts/mystery-publish.mjs";
 import { syntheticMysteryPackage } from "./fixtures/synthetic-mystery-package.mjs";
 import { publishMysteryDefinition } from "../../src/lib/mystery-content/publication.ts";
 import { sealMysteryDefinition } from "../../src/lib/mystery-content/integrity.ts";
@@ -132,7 +133,8 @@ test("production authentication requires MFA and rejects identity mismatches", a
       getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: "aal2" } }),
     },
   } };
-  const run = () => authenticate(client, config, "fake-password", false, {}, {}, async () => "123456");
+  const run = () => authenticate(client, config, "fake-password", false, {}, { write: () => {} }, async (_i, _o, label) =>
+    label === "CAPTCHA token" ? "captcha-token" : "123456");
   await run();
   verifiedId = "other";
   await assert.rejects(run(), /PUBLISHER_IDENTITY_MISMATCH/);
@@ -261,10 +263,11 @@ function productionEnrollment() {
   const events = [];
   let text = "";
   const client = { auth: {
-    signInWithPassword: async ({ email, password }) => {
+    signInWithPassword: async ({ email, password, options }) => {
       events.push("login");
       assert.equal(email, config.email);
       assert.equal(password, "fake-password_123");
+      assert.deepEqual(options, { captchaToken: "fake-captcha-token" });
       return { data: { session: session({ aal: "aal1" }) } };
     },
     getUser: async () => { events.push("identity"); return { data: { user: { id: userId } } }; },
@@ -294,8 +297,8 @@ function productionEnrollment() {
     readPassword: async (_input, _output, label) => {
       assert.match(text, /https:\/\/exampleproject\.supabase\.co/);
       assert.match(text, new RegExp(userId));
-      events.push(label ? "code" : "password");
-      return label ? "654321" : "fake-password_123";
+      events.push(label === "CAPTCHA token" ? "captcha" : label ? "code" : "password");
+      return label === "CAPTCHA token" ? "fake-captcha-token" : label ? "654321" : "fake-password_123";
     },
     loadPackage: () => assert.fail("enrollment must not load a package"),
     confirm: () => assert.fail("enrollment must not request publication approval"),
@@ -322,7 +325,7 @@ test("Production enrollment displays destination, verifies MFA identity, and onl
     await save(...args);
   };
   await publish(fixture.options);
-  assert.deepEqual(fixture.events, ["client", "password", "login", "code", "mfa", "identity", "saved", "signout"]);
+  assert.deepEqual(fixture.events, ["client", "password", "captcha", "login", "code", "mfa", "identity", "saved", "signout"]);
   assert.match(fixture.text(), /one-killer-party\.mystery-publisher\.production\.exampleproject/);
   assert.match(fixture.text(), /owner@example\.invalid/);
   assert.match(fixture.text(), /Production publisher credential enrolled/);
@@ -445,4 +448,268 @@ test("registration diagnostics expose only allowlisted codes", async () => {
   client.rpc = async () => ({ error: { code: "SENTINEL", message: "SENTINEL" } });
   await assert.rejects(store.register({}, "path", "rules", {}), /REGISTRATION_FAILED/);
   assert.deepEqual(diagnostics, { phase: "registration", rpcCode: "OTHER" });
+});
+
+test("enrollment-only flag requires production and rejects all conflicting trailing or leading arguments", () => {
+  for (const args of [
+    ["--target", "production", "--enroll-mfa"],
+    ["--enroll-mfa", "--target", "production"],
+  ]) assert.equal(parseArguments(args).enrollMfa, true);
+  for (const args of [
+    ["--enroll-mfa"], ["--target", "local", "--enroll-mfa"],
+    ["--target", "production", "--enroll-mfa", "/package"],
+    ["--target", "production", "--enroll-mfa", "--keychain"],
+    ["--keychain", "--target", "production", "--enroll-mfa"],
+    ["--target", "production", "--enroll-mfa", "--enroll-keychain"],
+    ["--target", "production", "--enroll-mfa", "--mfa"],
+    ["--target", "production", "--enroll-mfa", "--enroll-mfa"],
+    ["--target", "production", "--enroll-mfa", "--unknown"],
+    ["--target", "production", "--enroll-mfa", "--target", "local"],
+  ]) assert.throws(() => parseArguments(args), /INVALID_ARGUMENTS/);
+});
+
+function totpEnrollment() {
+  const config = productionConfiguration(productionEnv);
+  const now = Math.floor(Date.now() / 1000);
+  const ordinary = { role: "authenticated", iss: config.issuer };
+  const initial = session(ordinary);
+  const verified = session({ ...ordinary, aal: "aal2", iat: now,
+    amr: [{ method: "password", timestamp: now }, { method: "totp", timestamp: now }] });
+  const events = [];
+  let text = "";
+  const client = {
+    auth: {
+      signInWithPassword: async (args) => { events.push("login");
+        assert.deepEqual(args.options, { captchaToken: "synthetic-captcha" });
+        return { data: { session: initial } }; },
+      getUser: async () => { events.push("user"); return { data: { user: { id: userId } } }; },
+      signOut: async () => { events.push("signout"); },
+      mfa: {
+        listFactors: async () => { events.push("factors"); return { data: { all: events.includes("verified") ?
+          [{ id: "factor", factor_type: "totp", status: "verified" }] : [] } }; },
+        enroll: async (args) => { events.push("enroll"); assert.deepEqual(args, { factorType: "totp" });
+          return { data: { id: "factor", type: "totp", totp: { secret: "ABCDEFGHIJKLMNOP" } } }; },
+        challengeAndVerify: async (args) => { events.push("verified");
+          assert.deepEqual(args, { factorId: "factor", code: "123456" }); return { data: verified }; },
+        getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: "aal2" } }),
+      },
+    },
+    get storage() { assert.fail("must not access storage"); },
+    rpc: () => assert.fail("must not call RPC"),
+  };
+  const options = { argv: ["--target", "production", "--enroll-mfa"], env: productionEnv,
+    input: { isTTY: true }, output: { isTTY: true, write: (value) => { text += value; } },
+    makeClient: () => client,
+    readPassword: async (_i, _o, label) => label === "CAPTCHA token" ? "synthetic-captcha" :
+      label === "Authenticator code" ? "123456" : "synthetic-password",
+    checkTerminal: async () => { events.push("terminal"); },
+    showSecret: async (_i, _o, secret) => { events.push("display"); assert.equal(secret, "ABCDEFGHIJKLMNOP"); return true; },
+    loadPackage: () => assert.fail("must not read package"),
+    confirm: () => assert.fail("must not confirm publication"),
+    credentialStore: { read: () => assert.fail("must not read Keychain"), enroll: () => assert.fail("must not write Keychain") },
+  };
+  return { options, client, events, text: () => text, initial, verified };
+}
+
+test("production TOTP enrollment uses ordinary identity and never accesses publishing or Keychain", async () => {
+  const f = totpEnrollment();
+  await publish(f.options);
+  assert.deepEqual(f.events, ["login", "user", "factors", "terminal", "enroll", "display", "verified", "user", "factors", "signout"]);
+  assert.match(f.text(), /AAL2/);
+  assert.doesNotMatch(f.text(), /synthetic-captcha|synthetic-password|\b123456\b|ABCDEFGHIJKLMNOP/);
+});
+
+test("TOTP enrollment refuses mismatched users, roles and existing factors before mutation", async () => {
+  for (const change of [
+    (f) => { f.client.auth.getUser = async () => ({ data: { user: { id: "other" } } }); },
+    (f) => { f.client.auth.signInWithPassword = async () => ({ data: { session: session({ role: "mystery_operator",
+      iss: productionConfiguration(productionEnv).issuer }) } }); },
+    (f) => { f.client.auth.signInWithPassword = async () => ({ data: { session: session({ role: "authenticated",
+      iss: "https://other.invalid/auth/v1" }) } }); },
+  ]) {
+    const f = totpEnrollment(); change(f);
+    await assert.rejects(publish(f.options), /PUBLISHER_IDENTITY_MISMATCH/);
+    assert.ok(!f.events.includes("enroll"));
+  }
+  for (const status of ["verified", "unverified"]) {
+    const f = totpEnrollment();
+    f.client.auth.mfa.listFactors = async () => ({ data: { all: [{ id: "existing", factor_type: "totp", status }] } });
+    await assert.rejects(publish(f.options), /MFA_FACTOR_EXISTS/);
+    assert.ok(!f.events.includes("enroll"));
+    assert.match(f.text(), /approved Auth recovery/);
+  }
+});
+
+test("TOTP enrollment fails closed and redacts provider errors throughout", async () => {
+  const cases = [
+    [(f) => { f.client.auth.mfa.listFactors = async () => { throw new Error("SECRET_PROVIDER"); }; }, "MFA_FACTOR_CHECK_FAILED"],
+    [(f) => { f.client.auth.mfa.enroll = async () => { throw new Error("SECRET_PROVIDER"); }; }, "MFA_ENROLLMENT_FAILED"],
+    [(f) => { f.options.showSecret = async () => false; }, "CANCELLED"],
+    [(f) => { f.client.auth.mfa.challengeAndVerify = async () => { throw new Error("SECRET_PROVIDER"); }; }, "MFA_FAILED"],
+    [(f) => { f.client.auth.mfa.getAuthenticatorAssuranceLevel = async () => ({ data: { currentLevel: "aal1" } }); }, "MFA_FAILED"],
+    [(f) => { f.client.auth.mfa.challengeAndVerify = async () => ({ data: session({ role: "mystery_operator",
+      iss: productionConfiguration(productionEnv).issuer, aal: "aal2" }) }); }, "PUBLISHER_IDENTITY_MISMATCH"],
+    [(f) => { f.client.auth.mfa.listFactors = async () => ({ data: { all: [] } }); }, "MFA_FACTOR_CHECK_FAILED"],
+  ];
+  for (const [change, message] of cases) {
+    const f = totpEnrollment(); change(f);
+    await assert.rejects(publish(f.options), { message });
+    assert.equal(f.events.at(-1), "signout");
+    assert.doesNotMatch(f.text(), /SECRET_PROVIDER|synthetic-captcha|synthetic-password|ABCDEFGHIJKLMNOP|\b123456\b/);
+  }
+});
+
+test("production CAPTCHA is required, passed once, and provider failures are redacted; local has no CAPTCHA", async () => {
+  for (const value of [null, "", "invalid token", "invalid\nvalue"]) {
+    const f = totpEnrollment();
+    f.options.readPassword = async (_i, _o, label) => label === "CAPTCHA token" ? value : "password";
+    await assert.rejects(publish(f.options), /CANCELLED|CAPTCHA_INVALID/);
+    assert.ok(!f.events.includes("login"));
+  }
+  for (const failure of [
+    async () => ({ error: { message: "SECRET_PROVIDER" } }),
+    async () => { throw new Error("SECRET_PROVIDER"); },
+  ]) {
+    const f = totpEnrollment();
+    f.client.auth.signInWithPassword = failure;
+    await assert.rejects(publish(f.options), { message: "AUTHENTICATION_FAILED" });
+    assert.doesNotMatch(f.text(), /SECRET_PROVIDER|synthetic-captcha/);
+  }
+  let args;
+  const client = { auth: { signInWithPassword: async (value) => { args = value; return { data: { session: session() } }; },
+    getUser: async () => ({ data: { user: { id: userId } } }) } };
+  await authenticate(client, localConfiguration(env), "password", false, {}, {}, () => assert.fail("unexpected prompt"));
+  assert.deepEqual(args, { email: env.MYSTERY_PUBLISHER_EMAIL, password: "password" });
+});
+
+function fakeInput() {
+  const input = new EventEmitter();
+  input.isTTY = true;
+  input.setRawMode = (mode) => { input.raw = mode; };
+  input.resume = () => {};
+  input.pause = () => {};
+  return input;
+}
+
+test("hidden prompt handles unicode, cancellation, EOF, length limits and timeout without echo", async () => {
+  for (const [chunk, expected, options] of [
+    ["pässword\r", "pässword", {}], ["\u0003", null, {}],
+    ["abcdef\r", null, { maxLength: 3 }], ["ab\u001bcd\r", null, { maxLength: 8 }],
+  ]) {
+    const input = fakeInput(); let output = "";
+    const promise = passwordPrompt(input, { write: (value) => { output += value; } }, "Prompt", options);
+    input.emit("data", Buffer.from(chunk));
+    assert.equal(await promise, expected);
+    assert.equal(input.raw, false);
+    assert.doesNotMatch(output, /pässword|abcdef|abcd/);
+  }
+  const eof = fakeInput();
+  const ending = passwordPrompt(eof, { write: () => {} });
+  eof.emit("end");
+  assert.equal(await ending, null);
+  const timeout = fakeInput();
+  let timedOutput = "";
+  let settled = false;
+  const timed = passwordPrompt(timeout, { write: (s) => { timedOutput += s; } }, "CAPTCHA", { timeoutMs: 5 })
+    .then((value) => { settled = true; return value; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(settled, false);
+  assert.equal(timeout.raw, true);
+  assert.match(timedOutput, /Input remains hidden/);
+  timeout.emit("data", Buffer.from("late-secret-token\r"));
+  assert.equal(await timed, null);
+  assert.doesNotMatch(timedOutput, /late-secret-token/);
+  assert.equal(timeout.raw, false);
+});
+
+test("TOTP setup uses alternate screen on controlling tty, clears on cancellation and write failure", async () => {
+  for (const [key, expected] of [["\r", true], ["\u0003", false]]) {
+    const input = fakeInput(); const writes = []; let stdout = ""; let closed = false;
+    const promise = showTotpSecret(input, { isTTY: true, columns: 80, rows: 24, write: (s) => { stdout += s; } }, "ABCDEFGHIJKLMNOP", async (path) => {
+      assert.equal(path, "/dev/tty");
+      return { write: async (s) => { writes.push(s); }, close: async () => { closed = true; } };
+    }, () => true);
+    await new Promise((resolve) => setImmediate(resolve));
+    input.emit("data", Buffer.from(key));
+    assert.equal(await promise, expected);
+    assert.equal(writes[0], "\x1b[?1049h\x1b[2J\x1b[H");
+    assert.match(writes[1], /ABCDEFGHIJKLMNOP/);
+    assert.equal(writes[2], "\x1b[2J\x1b[H\x1b[?1049l");
+    assert.equal(input.raw, false);
+    assert.equal(closed, true);
+    assert.doesNotMatch(stdout, /ABCDEFGHIJKLMNOP/);
+  }
+  const writes = [];
+  await assert.rejects(showTotpSecret(fakeInput(), { isTTY: true, columns: 80, rows: 24, write: () => {} }, "ABCDEFGHIJKLMNOP", async () => ({
+    write: async (s) => { writes.push(s); if (s.includes("ABCDEFGHIJKLMNOP")) throw new Error("SECRET_PROVIDER"); },
+    close: async () => {},
+  }), () => true), { message: "INTERACTIVE_TERMINAL_REQUIRED" });
+  assert.equal(writes.at(-1), "\x1b[2J\x1b[H\x1b[?1049l");
+  await assert.rejects(showTotpSecret(fakeInput(), { isTTY: true, columns: 20, rows: 24, write: () => {} },
+    "ABCDEFGHIJKLMNOP", () => assert.fail("must not display wrapped key")), { message: "TERMINAL_TOO_SMALL" });
+  const input = fakeInput();
+  input.resume = () => { throw new Error("SECRET_PROVIDER"); };
+  const cleanup = [];
+  await assert.rejects(showTotpSecret(input, { isTTY: true, columns: 80, rows: 24, write: () => {} }, "ABCDEFGHIJKLMNOP", async () => ({
+    write: async (s) => { cleanup.push(s); }, close: async () => {},
+  }), () => true), { message: "INTERACTIVE_TERMINAL_REQUIRED" });
+  assert.equal(input.raw, false);
+  assert.equal(input.listenerCount("data"), 0);
+  assert.equal(cleanup.at(-1), "\x1b[2J\x1b[H\x1b[?1049l");
+});
+
+test("enrollment checks size, raw input and controlling tty before creating a factor", async () => {
+  for (const [change, code] of [
+    [(input, output) => { output.columns = 39; }, "TERMINAL_TOO_SMALL"],
+    [(input, output) => { output.rows = 3; }, "TERMINAL_TOO_SMALL"],
+    [(input) => { input.setRawMode = undefined; }, "INTERACTIVE_TERMINAL_REQUIRED"],
+  ]) {
+    const f = totpEnrollment();
+    const input = fakeInput();
+    const output = { isTTY: true, columns: 80, rows: 24 };
+    change(input, output);
+    f.options.checkTerminal = () => checkTotpTerminal(input, output, () => assert.fail("must not open"));
+    await assert.rejects(publish(f.options), { message: code });
+    assert.ok(!f.events.includes("enroll"));
+    assert.equal(f.events.at(-1), "signout");
+  }
+  for (const openTerminal of [
+    async () => { throw new Error("sensitive terminal error"); },
+    async () => ({ fd: 42, close: async () => {} }),
+  ]) {
+    const f = totpEnrollment();
+    f.options.checkTerminal = () => checkTotpTerminal(fakeInput(), { isTTY: true, columns: 80, rows: 24 },
+      openTerminal, () => false);
+    await assert.rejects(publish(f.options), { message: "INTERACTIVE_TERMINAL_REQUIRED" });
+    assert.ok(!f.events.includes("enroll"));
+    assert.equal(f.events.at(-1), "signout");
+  }
+  let closed = false;
+  await checkTotpTerminal(fakeInput(), { isTTY: true, columns: 40, rows: 6 },
+    async (path) => { assert.equal(path, "/dev/tty"); return { fd: 42, close: async () => { closed = true; } }; },
+    (fd) => fd === 42);
+  assert.equal(closed, true);
+});
+
+test("setup display fits long keys without wrapping and rechecks dimensions after enrollment", async () => {
+  const input = fakeInput();
+  const writes = [];
+  const secret = "A".repeat(128);
+  const shown = showTotpSecret(input, { isTTY: true, columns: 40, rows: 6, write: () => {} }, secret,
+    async () => ({ fd: 42, write: async (s) => { writes.push(s); }, close: async () => {} }), () => true);
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("data", Buffer.from("\r"));
+  assert.equal(await shown, true);
+  const lines = writes[1].split("\r\n");
+  assert.equal(lines.shift(), "Setup key:");
+  assert.equal(lines.join(""), secret);
+  assert.ok(lines.every((line) => line.length < 40));
+
+  const f = totpEnrollment();
+  f.options.showSecret = () => showTotpSecret(fakeInput(), { isTTY: true, columns: 39, rows: 6, write: () => {} },
+    "ABCDEFGHIJKLMNOP", () => assert.fail("must not display after resize"));
+  await assert.rejects(publish(f.options), { message: "TERMINAL_TOO_SMALL" });
+  assert.ok(f.events.includes("enroll"));
+  assert.match(f.text(), /unverified factor may remain/);
+  assert.equal(f.events.at(-1), "signout");
 });
