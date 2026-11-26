@@ -40,6 +40,14 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'operator role has unsafe attributes or memberships';
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles
+    WHERE rolname = 'authenticator' AND rolcanlogin AND NOT rolinherit
+      AND NOT (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication)
+  ) THEN
+    RAISE EXCEPTION USING ERRCODE = '42501',
+      MESSAGE = 'authenticator role has unsafe attributes';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'cli_login_postgres') THEN
     IF NOT EXISTS (
       SELECT 1 FROM pg_catalog.pg_roles
@@ -54,24 +62,16 @@ BEGIN
       SELECT 1 FROM pg_catalog.pg_auth_members
       WHERE member = 'cli_login_postgres'::regrole AND roleid = 'postgres'::regrole
         AND set_option AND NOT inherit_option
+        AND NOT admin_option
     ) OR EXISTS (
       SELECT 1 FROM pg_catalog.pg_auth_members
       WHERE member = 'cli_login_postgres'::regrole AND roleid = 'postgres'::regrole
-        AND (NOT set_option OR inherit_option)
-    ) OR NOT EXISTS (
+        AND (NOT set_option OR inherit_option OR admin_option)
+    ) OR (SELECT count(*) FROM pg_catalog.pg_auth_members
+          WHERE member = 'cli_login_postgres'::regrole) <> 1
+      OR EXISTS (
       SELECT 1 FROM pg_catalog.pg_auth_members
-      WHERE member = 'postgres'::regrole AND roleid = 'mystery_operator'::regrole
-        AND NOT set_option AND NOT inherit_option
-    ) OR EXISTS (
-      SELECT 1 FROM pg_catalog.pg_auth_members
-      WHERE member = 'postgres'::regrole AND roleid = 'mystery_operator'::regrole
-        AND (set_option OR inherit_option)
-    ) OR NOT EXISTS (
-      SELECT 1 FROM pg_catalog.pg_auth_members
-      WHERE member = 'postgres'::regrole AND roleid = 'authenticator'::regrole AND set_option
-    ) OR NOT EXISTS (
-      SELECT 1 FROM pg_catalog.pg_auth_members
-      WHERE member = 'authenticator'::regrole AND roleid = 'mystery_operator'::regrole AND set_option
+      WHERE roleid = 'cli_login_postgres'::regrole
     ) OR NOT pg_catalog.pg_has_role('cli_login_postgres', 'postgres', 'SET')
       OR NOT pg_catalog.pg_has_role('cli_login_postgres', 'mystery_operator', 'SET')
       OR pg_catalog.pg_has_role('cli_login_postgres', 'mystery_operator', 'USAGE') THEN
@@ -80,28 +80,70 @@ BEGIN
     END IF;
   END IF;
   IF EXISTS (
-    WITH RECURSIVE inbound(role_oid) AS (
-      SELECT member FROM pg_catalog.pg_auth_members
-      WHERE roleid = 'mystery_operator'::regrole
-      UNION
-      SELECT membership.member
+    WITH RECURSIVE inbound(role_oid, path, cycle) AS (
+      SELECT 'mystery_operator'::regrole::oid,
+             ARRAY['mystery_operator'::regrole::oid],
+             false
+      UNION ALL
+      SELECT membership.member, inbound.path || membership.member,
+             membership.member = ANY(inbound.path)
       FROM pg_catalog.pg_auth_members AS membership
       JOIN inbound ON membership.roleid = inbound.role_oid
+      WHERE NOT inbound.cycle
+    ), expected_edges(member_name, role_name, set_option, inherit_option, admin_option) AS (
+      VALUES
+        ('authenticator'::name, 'mystery_operator'::name, true, false, false),
+        ('postgres'::name, 'mystery_operator'::name, false, false, true),
+        ('postgres'::name, 'authenticator'::name, true, true, true),
+        ('supabase_storage_admin'::name, 'authenticator'::name, true, false, false),
+        ('cli_login_postgres'::name, 'postgres'::name, true, false, false)
+    ), actual_edges AS (
+      SELECT member.rolname AS member_name, granted.rolname AS role_name,
+             membership.set_option, membership.inherit_option,
+             membership.admin_option,
+             count(*) AS grant_count
+      FROM pg_catalog.pg_auth_members AS membership
+      JOIN inbound ON inbound.role_oid = membership.roleid
+      JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+      JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+      GROUP BY member.rolname, granted.rolname,
+               membership.set_option, membership.inherit_option,
+               membership.admin_option
+    ), invalid_nodes AS (
+      SELECT 1
+      FROM inbound
+      JOIN pg_catalog.pg_roles AS role ON role.oid = inbound.role_oid
+      WHERE inbound.cycle
+         OR role.rolname NOT IN (
+           'mystery_operator', 'authenticator', 'postgres',
+           'supabase_storage_admin', 'cli_login_postgres'
+         )
+    ), invalid_edges AS (
+      SELECT 1
+      FROM actual_edges AS actual
+      LEFT JOIN expected_edges AS expected
+        ON expected.member_name = actual.member_name
+       AND expected.role_name = actual.role_name
+       AND expected.set_option = actual.set_option
+       AND expected.inherit_option = actual.inherit_option
+       AND expected.admin_option = actual.admin_option
+      WHERE expected.member_name IS NULL OR actual.grant_count <> 1
+      UNION ALL
+      SELECT 1
+      FROM expected_edges AS expected
+      WHERE (expected.member_name <> 'cli_login_postgres'
+             OR EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'cli_login_postgres'))
+        AND (SELECT count(*)
+             FROM actual_edges AS actual
+             WHERE actual.member_name = expected.member_name
+               AND actual.role_name = expected.role_name
+               AND actual.set_option = expected.set_option
+               AND actual.inherit_option = expected.inherit_option
+               AND actual.admin_option = expected.admin_option) <> 1
     )
-    SELECT 1 FROM inbound
-    JOIN pg_catalog.pg_roles AS role ON role.oid = inbound.role_oid
-    WHERE NOT (
-      role.rolname IN ('authenticator', 'supabase_storage_admin')
-      OR (role.rolname IN ('postgres', 'supabase_admin')
-          AND (role.rolsuper OR role.rolbypassrls))
-      OR (role.rolname = 'cli_login_postgres' AND NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_auth_members AS membership
-        WHERE membership.member = role.oid
-          AND membership.roleid <> 'postgres'::regrole
-          AND (membership.roleid = 'mystery_operator'::regrole
-               OR membership.roleid IN (SELECT role_oid FROM inbound))
-      ))
-    )
+    SELECT 1 FROM invalid_nodes
+    UNION ALL
+    SELECT 1 FROM invalid_edges
   ) THEN
     RAISE EXCEPTION USING ERRCODE = '42501',
       MESSAGE = 'unauthorized direct or indirect mystery_operator member';

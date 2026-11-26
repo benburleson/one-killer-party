@@ -252,10 +252,16 @@ result. Disposable Supabase also has SET-enabled
 edge; adding a synthetic delegate of `postgres` reproduced effective SET=true
 and USAGE=false. This is a candidate explanation, not a confirmed Production
 path. Investigate all actual paths, duplicate grants and role attributes
-without assuming the cause. The revised guard requires that exact trusted
-SET-enabled chain, the reviewed direct edges and options, and effective SET;
-it fails closed if any are absent or anomalous. Acceptance in a disposable
-database does not verify the Production path. Manual installation remains blocked
+without assuming the cause. The revised guard requires the exact membership
+edges and SET/INHERIT/ADMIN options represented by the disposable Supabase
+baseline, the single `cli_login_postgres -> postgres` grant, and the reported
+effective SET/USAGE results; alternate edges, grantors/duplicate catalog rows,
+cycles, and role-option drift fail closed. Production `ADMIN` option values
+and the additional `postgres -> authenticator` path have not been independently
+verified from the evidence available to this change. A mismatch or incomplete
+catalog inspection is a blocker; do not broaden the accepted graph to fit.
+Acceptance in a disposable database does not verify the Production path.
+Manual installation remains blocked
 pending owner architecture review and a fresh post-merge read-only Production
 recheck, followed by separate installation approval.
 

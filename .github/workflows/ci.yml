@@ -39,7 +39,18 @@ jobs:
         run: |
           docker cp supabase/tests/production-publisher-hook-review.inc supabase_db_one-killer-party:/tmp/production-publisher-hook-review.inc
           docker cp supabase/tests/production-publisher-delegation.test.sql supabase_db_one-killer-party:/tmp/production-publisher-delegation.test.sql
-          docker exec supabase_db_one-killer-party psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -v require_superuser=1 -f /tmp/production-publisher-delegation.test.sql
+          docker exec supabase_db_one-killer-party psql -X -A -t -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -v require_superuser=1 -f /tmp/production-publisher-delegation.test.sql > /tmp/publisher-delegation.tap
+          cat /tmp/publisher-delegation.tap
+          if grep -Eq '^not ok([[:space:]]|$)' /tmp/publisher-delegation.tap; then
+            echo "Publisher delegation pgTAP assertion failed"
+            exit 1
+          fi
+          plan="$(sed -n 's/^1\.\.\([0-9][0-9]*\)$/\1/p' /tmp/publisher-delegation.tap | tail -n 1)"
+          assertions="$(grep -Ec '^(ok|not ok) [0-9]+([[:space:]]|$)' /tmp/publisher-delegation.tap || true)"
+          if [ -z "$plan" ] || [ "$plan" -eq 0 ] || [ "$assertions" -ne "$plan" ]; then
+            echo "Publisher delegation pgTAP output is incomplete"
+            exit 1
+          fi
       - name: Test private mystery publication against local Supabase
         run: npm run test:integration:mystery
       - name: Stop local Supabase and remove volumes
