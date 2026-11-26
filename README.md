@@ -1,103 +1,36 @@
 # One Killer Party
 
-**A murder-mystery party in your pocket — and a public experiment in autonomous, human-supervised software delivery.**
+An in-person, phone-assisted murder-mystery game. Guests interact face-to-face; the app manages invitations, public roles and lobby coordination. The initial mystery is **The Blackwood Affair**.
 
-One Killer Party is an in-person, phone-assisted murder-mystery experience designed for guests to interact face-to-face while the app provides game guidance and pacing. Alongside the product, this repository showcases an AI-assisted engineering lifecycle: **GitHub issue → coding agent → isolated branch → automated tests and evidence → PR ready for human review → human-controlled merge**.
+## Current state (November 2026)
 
-## What we're building
+- **Live application:** https://app.onekillerparty.com (host entry: `/host`); marketing: https://onekillerparty.com.
+- **Implemented:** host magic-link authentication, lobby creation, invitations and rotation, anonymous guest join and host-assisted recovery, public character assignment, and synchronized lobby views.
+- **Gameplay boundary:** parties remain in `LOBBY`. Private dossiers, timed release, act progression, and solution reveal are **not** implemented. The legacy Blackwood lobby pin is a **public roster placeholder**, not a private published mystery package.
+- **Private content foundation:** versioned mystery package schema/validation/canonical SHA-256, private Supabase Storage and immutable Postgres publication registry, MFA-gated dedicated publisher with Cloudflare Turnstile and macOS Keychain. A **synthetic test package** (`synthetic-mystery/1.0.0-test.1`) was published to Production and independently checked against registry and Storage metadata. **No real Blackwood mystery package has been published.** The trusted loader is not exposed through host/guest routes.
+- **Production identity:** the Custom Access Token Hook `private_mystery.production_publisher_hook` is enabled. Owner-tested host sign-in, guest join and publisher TOTP/role authentication succeeded. This does **not** mean private content is available to players.
+- **Delivery:** AI-assisted GitHub issue → isolated agent branch → tests/PR → human review and merge. Production changes, content publication and security configuration require explicit owner action.
 
-The initial playable mystery is **The Blackwood Affair**. Product behavior is specified in the version-controlled [product specification](docs/product/product-vision.md), including:
+For evidence levels and remaining operational limits, see [Production operations](docs/production-operations.md). These are owner-reported Production observations, not direct dashboard access by the repository.
 
-- [Vision and scope](docs/product/product-vision.md)
-- [Game rules and state](docs/product/gameplay-specification.md)
-- [Host and player journeys](docs/product/host-and-player-flows.md)
-- [Reusable mystery content model](docs/product/mystery-content-model.md)
-- [The Blackwood Affair](docs/product/blackwood-affair.md)
-- [Decision register and open questions](docs/product/decisions-and-open-questions.md)
+## Documentation map
 
-The v0.3 documents are an **implementation baseline**, not a claim that all gameplay details are finalized. They label confirmed decisions, proposals and unresolved questions; implementation issues must reference the relevant requirements rather than inventing missing rules.
+| Need | Read |
+| --- | --- |
+| What the game should become | [Product vision](docs/product/product-vision.md), [gameplay](docs/product/gameplay-specification.md), [host/player flows](docs/product/host-and-player-flows.md) |
+| Story and unresolved product choices | [Blackwood Affair](docs/product/blackwood-affair.md), [decision register](docs/product/decisions-and-open-questions.md) |
+| Lobby database and authorization | [Lobby persistence](docs/architecture/lobby-persistence.md) |
+| Private content boundaries and code contract | [Mystery architecture](docs/architecture/mystery-content-architecture.md), [package contract](docs/architecture/mystery-content-package.md) |
+| Start, test and troubleshoot development | [Development environments](docs/development-environments.md) |
+| Operate Production, authenticate publisher, back up and recover | [Production operations](docs/production-operations.md) |
+| Agent and PR conventions | [Agent instructions](.github/copilot-instructions.md), [workflow setup](docs/workflow-setup.md) |
 
-## Development lifecycle
+Product specs distinguish **confirmed** requirements from proposals; no implementation agent should invent an answer to an open question.
 
-```text
-Product specification / GitHub issue
-                |
-                v
-      Copilot coding agent
-       isolated issue branch
-                |
-                v
-       Implement and test
-                |
-                v
-    PR + CI + Playwright evidence
-                |
-                v
-       Vercel PR preview
-                |
-                v
-    Ready for human review
-                |
-                v
-     Human-controlled merge
-```
+## Develop
 
-**No automatic merge to `main`.** Agent-generated code and tests are proposals, not approvals; human review and merge remain required.
+Use the [dev container](.devcontainer/devcontainer.json) or Codespaces, and follow [Development environments](docs/development-environments.md) for local Supabase setup, safe environment variables, build/test commands and troubleshooting. `package.json` defines the authoritative npm scripts; `supabase/config.toml` and migrations define the disposable database setup. Never point development tests at Production.
 
-## Current implementation
+## Security and maintenance
 
-The repository's current application code supports host magic-link sign-in, Blackwood Affair lobby creation, guest join and host-assisted recovery, public role assignment, and spoiler-safe live lobby synchronization. The product remains in the `LOBBY` phase: private dossiers and game progression are not implemented. See the [product specifications](docs/product/product-vision.md) for confirmed scope and open decisions.
-
-- **Application:** https://app.onekillerparty.com (host page at `/host`)
-- **Marketing domain:** https://onekillerparty.com (also `www.onekillerparty.com`)
-- **Stack:** Vercel, Supabase Auth/Postgres, and custom SMTP (owner-reported configuration); see [production operations](docs/production-operations.md)
-- **Production status:** the owner attests that the lobby migrations through `20261122010000_public_character_assignment.sql` are applied and that guest join/recovery, role assignment and lobby synchronization were smoke-tested in production. This is owner attestation, not independently verified evidence; `20261123000000_browser_role_lockdown_and_join_pin.sql` is not applied. See [production operations](docs/production-operations.md).
-- **Local/CI integration:** disposable Supabase Docker stack; migration/RLS tests and local host-flow browser tests
-- **Delivery:** Copilot issue-to-PR development with CI and human-reviewed merge
-
-For setup and security instructions, see [development environments](docs/development-environments.md), [lobby persistence](docs/architecture/lobby-persistence.md), [mystery content architecture](docs/architecture/mystery-content-architecture.md) and [production operations](docs/production-operations.md). Dated trials and incidents live only in the [agent evaluation](docs/agent-evaluation.md) archive.
-
-## Development environment — dev container first
-
-**Preferred:** use the repo's [dev container](.devcontainer/devcontainer.json), with Node.js 22, npm dependencies, and Chromium for Playwright. This works in VS Code + Docker and compatible GitHub Codespaces environments.
-
-1. Install Docker and the VS Code **Dev Containers** extension, or use GitHub Codespaces.
-2. Clone the repository and open it in VS Code.
-3. Select **Dev Containers: Reopen in Container** from the Command Palette. Setup runs `npm ci` and installs Playwright Chromium/dependencies.
-4. Start the app inside the container:
-
-```bash
-npm run dev
-```
-
-Open forwarded port **3000**. Start the disposable local Supabase stack with `npx supabase start` when testing auth/database features; use a local-only, uncommitted `.env.local`. Never point automated tests at production.
-
-### Verify locally
-
-```bash
-npm run test:unit
-npm run lint
-npx tsc --noEmit
-npm run build
-npm run test:e2e -- --project=desktop-chromium --project=mobile-chromium
-```
-
-Playwright tests use the production build (`npm run build` first). Local screenshots and HTML reports appear under `test-results/` and `playwright-report/`; CI uploads only the allowlisted landing-page screenshot as `playwright-evidence` (14-day retention).
-
-**Fallback without a container:** install Node.js 22 and npm locally, run `npm ci`, then `npx playwright install --with-deps chromium` (Linux) or `npx playwright install chromium` (macOS). Run the same scripts above.
-
-### Environment parity and limitations
-
-The dev container is the **preferred interactive workspace**, not the automatic runtime of GitHub Copilot's cloud agent. When Copilot runs on GitHub Actions, [`copilot-setup-steps.yml`](.github/workflows/copilot-setup-steps.yml) prepares Node 22, dependencies and Chromium. CI independently verifies changes on Linux runners. All environments use the same package lockfile and npm scripts, but different host images can still behave differently.
-
-For setup details and known limitations, see [development environments](docs/development-environments.md).
-
-## How to explore the showcase
-
-Start with [the lifecycle](docs/agent-development-lifecycle.md) and [environment setup](docs/workflow-setup.md); inspect public [issues](https://github.com/benburleson/one-killer-party/issues), [pull requests](https://github.com/benburleson/one-killer-party/pulls), and [Actions runs](https://github.com/benburleson/one-killer-party/actions). See the [evaluation rubric](docs/agent-evaluation.md) for measured autonomy. Draft PRs are marked ready and merged by a human; automatic draft promotion was retired.
-
-## Stack and safety
-
-Next.js (App Router), React, TypeScript, Tailwind CSS, Supabase, Playwright, GitHub Actions, Vercel.
-
-This repository is intentionally public. Never publish tokens, secrets, private player information or real production data in source, issues, artifacts or logs. Agent work uses isolated branches; production changes and merges require human authorization.
+This repository is public. Never commit private story content, player data, passwords, JWTs, MFA secrets, privileged Supabase credentials or Production backups. Code review, migrations, live Auth configuration and each mystery publication have separate approval gates. For procedures and current operational evidence, consult [Production operations](docs/production-operations.md); do not infer live status from source alone.
