@@ -8,16 +8,29 @@ SELECT rolsuper AS can_test_managed_roles FROM pg_catalog.pg_roles WHERE rolname
 \if :can_test_managed_roles
 CREATE ROLE cli_login_postgres LOGIN NOINHERIT;
 CREATE ROLE synthetic_rogue_admin_member NOLOGIN;
+CREATE ROLE synthetic_cycle_a NOLOGIN;
+CREATE ROLE synthetic_cycle_b NOLOGIN;
+GRANT synthetic_cycle_a TO synthetic_cycle_b;
+SAVEPOINT cycle_membership;
+\set ON_ERROR_STOP off
+GRANT synthetic_cycle_b TO synthetic_cycle_a;
+\set cycle_sqlstate :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT cycle_membership;
+SELECT is(:'cycle_sqlstate'::text, '0LP01'::text,
+  'PostgreSQL rejects cyclic role membership grants');
 GRANT postgres TO cli_login_postgres WITH SET TRUE, INHERIT FALSE;
 GRANT mystery_operator TO postgres WITH SET FALSE, INHERIT FALSE;
 GRANT authenticator TO postgres WITH SET TRUE;
-GRANT mystery_operator TO authenticator WITH SET TRUE;
 
 SELECT ok(
   pg_catalog.pg_has_role('cli_login_postgres', 'postgres', 'SET')
   AND pg_catalog.pg_has_role('cli_login_postgres', 'mystery_operator', 'SET')
+  AND pg_catalog.pg_has_role('cli_login_postgres', 'service_role', 'SET')
+  AND pg_catalog.pg_has_role('cli_login_postgres', 'pg_read_all_data', 'SET')
+  AND NOT pg_catalog.pg_has_role('cli_login_postgres', 'supabase_admin', 'SET')
   AND NOT pg_catalog.pg_has_role('cli_login_postgres', 'mystery_operator', 'USAGE'),
-  'delegated administrator has effective SET, but not inherited operator privileges'
+  'delegate reaches only the reviewed managed role set and not operator USAGE'
 );
 SAVEPOINT accepted_graph;
 \ir production-publisher-hook-review.inc
@@ -163,6 +176,31 @@ ROLLBACK TO SAVEPOINT extra_superuser_grant;
 SELECT is(:'rejected'::text, '42501'::text,
   'direct superuser membership cannot bypass the exact postgres delegation');
 
+SAVEPOINT duplicate_grantor;
+GRANT mystery_operator TO authenticator;
+\set ON_ERROR_STOP off
+\ir production-publisher-hook-review.inc
+\set rejected :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT duplicate_grantor;
+SELECT is(:'rejected'::text, '42501'::text,
+  'duplicate operator membership from an unexpected grantor is rejected');
+
+SAVEPOINT postgres_superuser_path;
+GRANT supabase_admin TO postgres WITH SET TRUE;
+SELECT pg_catalog.pg_has_role(
+  'cli_login_postgres', 'supabase_admin', 'SET'
+) AS superuser_effectively_reachable \gset
+\set ON_ERROR_STOP off
+\ir production-publisher-hook-review.inc
+\set rejected :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT postgres_superuser_path;
+SELECT ok(:'superuser_effectively_reachable'::boolean,
+  'test fixture grants a transitive effective SET path to supabase_admin');
+SELECT is(:'rejected'::text, '42501'::text,
+  'transitive SET access to supabase_admin is rejected');
+
 SAVEPOINT extra_delegate_grantee;
 GRANT cli_login_postgres TO synthetic_rogue_admin_member;
 \set ON_ERROR_STOP off
@@ -218,6 +256,16 @@ ALTER ROLE authenticator BYPASSRLS;
 ROLLBACK TO SAVEPOINT changed_authenticator;
 SELECT is(:'rejected'::text, '42501'::text,
   'forged elevated authenticator role name is rejected');
+
+SAVEPOINT changed_storage_admin;
+ALTER ROLE supabase_storage_admin SUPERUSER;
+\set ON_ERROR_STOP off
+\ir production-publisher-hook-review.inc
+\set rejected :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT changed_storage_admin;
+SELECT is(:'rejected'::text, '42501'::text,
+  'storage service principal superuser drift is rejected');
 
 SAVEPOINT changed_operator;
 ALTER ROLE mystery_operator CREATEROLE;

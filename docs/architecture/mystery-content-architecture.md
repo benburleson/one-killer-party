@@ -74,7 +74,16 @@ exist alongside the SET=false direct edge; adding a synthetic delegate of
 `postgres` reproduced SET=true and USAGE=false. This is a candidate
 explanation, not a confirmed
 Production path. Alternate paths, duplicate grants and the actual role graph
-require investigation. Manual installation remains blocked pending owner
+require investigation. In the disposable PostgreSQL 17 graph, the delegate
+can also SET `service_role` and PostgreSQL built-in privileged roles through
+`postgres`. The exact delegate is therefore trusted with the broader managed
+administrator/service-role boundary, not just publisher RPC authority. The
+review guard now checks the entire effective SET role set and all reachable
+membership edges, role options and grantors against that disposable baseline;
+an added route to `supabase_admin` or any other unapproved role is rejected.
+Production evidence supplied for this change does not establish that full role
+set or all grantors/options, so this baseline match remains a Production
+assumption and installation remains blocked pending owner
 architecture review and a fresh read-only Production recheck. Do not
 generalize to other paths or change Production grants to satisfy an installer. The
 [read-only membership review](../production-operations.md#owner-operated-read-only-production-preflight)

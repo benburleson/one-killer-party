@@ -252,14 +252,23 @@ result. Disposable Supabase also has SET-enabled
 edge; adding a synthetic delegate of `postgres` reproduced effective SET=true
 and USAGE=false. This is a candidate explanation, not a confirmed Production
 path. Investigate all actual paths, duplicate grants and role attributes
-without assuming the cause. The revised guard requires the exact membership
-edges and SET/INHERIT/ADMIN options represented by the disposable Supabase
+without assuming the cause. The revised guard requires exact membership edges
+and SET/INHERIT/ADMIN options and grantors from the disposable Supabase
 baseline, the single `cli_login_postgres -> postgres` grant, and the reported
-effective SET/USAGE results; alternate edges, grantors/duplicate catalog rows,
-cycles, and role-option drift fail closed. Production `ADMIN` option values
-and the additional `postgres -> authenticator` path have not been independently
-verified from the evidence available to this change. A mismatch or incomplete
-catalog inspection is a blocker; do not broaden the accepted graph to fit.
+effective SET/USAGE results; alternate edges, duplicate rows, cycles, and
+role-option drift fail closed. Production `ADMIN` option values and the
+additional `postgres -> authenticator` path have not been independently
+verified from the evidence available to this change. In the disposable
+PostgreSQL 17 graph, a role that can SET `postgres` can also SET the full
+managed role set, including `service_role`, `pg_read_all_data`, and
+PostgreSQL monitoring/administration roles. The CLI credential therefore
+inherits the broader administrator/service trust boundary; it is not an
+application-scoped publisher credential. The guard checks every effective SET
+role and every membership edge/options/grantor reachable from `postgres`, and
+rejects added paths such as `postgres -> supabase_admin`. The Production
+catalog evidence provided for this change does not enumerate that complete
+role set or all grantors/options. A mismatch or incomplete catalog inspection
+is a blocker; do not broaden the accepted graph to fit.
 Acceptance in a disposable database does not verify the Production path.
 Manual installation remains blocked
 pending owner architecture review and a fresh post-merge read-only Production
@@ -723,6 +732,29 @@ GitHub.
    JOIN pg_catalog.pg_roles AS granted ON granted.oid = m.roleid
    WHERE member.rolname = 'mystery_operator'
    ORDER BY granted.rolname;
+
+   -- Enumerate every effective SET role and every membership edge reachable
+   -- through postgres, including service and built-in privileged roles.
+   SELECT role.rolname, role.rolcanlogin, role.rolinherit, role.rolsuper,
+          role.rolbypassrls, role.rolcreaterole, role.rolcreatedb,
+          role.rolreplication,
+          pg_catalog.pg_has_role('cli_login_postgres', role.oid, 'SET') AS delegate_set,
+          pg_catalog.pg_has_role('cli_login_postgres', role.oid, 'USAGE') AS delegate_usage
+   FROM pg_catalog.pg_roles AS role
+   WHERE role.rolname IN ('cli_login_postgres', 'postgres')
+      OR pg_catalog.pg_has_role('cli_login_postgres', role.oid, 'SET')
+   ORDER BY role.rolname;
+
+   SELECT member.rolname AS member, granted.rolname AS granted_role,
+          m.set_option, m.inherit_option, m.admin_option,
+          pg_catalog.pg_get_userbyid(m.grantor) AS grantor
+   FROM pg_catalog.pg_auth_members AS m
+   JOIN pg_catalog.pg_roles AS member ON member.oid = m.member
+   JOIN pg_catalog.pg_roles AS granted ON granted.oid = m.roleid
+   WHERE member.rolname IN ('postgres', 'authenticator', 'cli_login_postgres')
+      OR granted.rolname = 'cli_login_postgres'
+      OR pg_catalog.pg_has_role('postgres', member.oid, 'SET')
+   ORDER BY member.rolname, granted.rolname, grantor;
    ```
 
    Compare every path, per-grant option, role flag and effective privilege with
