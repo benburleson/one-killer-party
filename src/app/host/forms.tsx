@@ -231,7 +231,7 @@ export function AssignCharacterForm({
             onChange={(event) => setConfirmed(event.target.checked)}
             required
           />
-          I confirm changing or clearing this assigned character.
+          I confirm changing or clearing this assigned character. The player may already have seen their private character information; changing it cannot make them forget it.
         </label>
       )}
       <button className={button} disabled={pending || stale || selectedOccupied || (replacing && !confirmed)}>
@@ -256,7 +256,7 @@ export function RemoveParticipantForm({
       <input type="hidden" name="participantId" value={participantId} />
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" name="confirm" value="yes" required />
-        I confirm removing this participant before the game starts.
+        I confirm removing this participant before the game starts. They may already have seen private character information; removing them cannot make them forget it.
       </label>
       <button className={button} disabled={pending}>Remove participant</button>
       {state.message && <p role="status">{state.message}</p>}

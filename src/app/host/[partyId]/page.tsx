@@ -22,6 +22,7 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
   const party = roster;
   const participants = roster.participants;
   const hostIsPlaying = participants.some((participant) => participant.isHost);
+  const hostParticipant = participants.find((participant) => participant.isHost);
   // Client components receive explicit allowlisted props, never whole server records.
   const assignmentRoster = participants.map(({ participantId, displayName, assignedCharacterId }) =>
     ({ participantId, displayName, assignedCharacterId }));
@@ -35,7 +36,10 @@ async function Party({ params }: { params: Promise<{ partyId: string }> }) {
     </div>
     <p className="mt-4">Party: {party.partyId}</p>
     <p>Status: {party.status} · Version: {roster.version}</p>
-    <HostLobbySync partyId={party.partyId} version={roster.version} />
+    <HostLobbySync partyId={party.partyId} version={roster.version}
+      participantId={hostParticipant?.participantId ?? null}
+      characterId={hostParticipant?.assignedCharacterId ?? null}
+      dossierAvailable={party.dossierAvailable} />
     <h2 className="mb-3 mt-8 text-xl font-semibold">Public character roster</h2>
     <ul className="grid gap-3 sm:grid-cols-2" aria-label="Public character roster">
       {party.characters.map((character) => {

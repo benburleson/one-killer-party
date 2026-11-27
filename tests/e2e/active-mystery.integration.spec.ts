@@ -205,6 +205,7 @@ async function createParty(page: Page, expectedTitle?: string) {
 
 async function joinAsGuest(browser: Browser, code: string, name: string, mobile: boolean) {
   const context = await testContext(browser, mobile);
+  const requests = watchDossierRequests(context);
   const page = await context.newPage();
   const assertNoPrivate = watchPublicResponses(page);
   await page.goto(`/join#code=${code}`);
@@ -213,7 +214,43 @@ async function joinAsGuest(browser: Browser, code: string, name: string, mobile:
   await page.getByLabel("Your display name").fill(name);
   await verifiedSubmit(page, "Join party");
   await expect(page.getByText(`Your display name: ${name}`)).toBeVisible();
-  return { context, page, assertNoPrivate };
+  return { context, page, assertNoPrivate, requests };
+}
+
+function watchDossierRequests(context: BrowserContext) {
+  const requests: string[] = [];
+  context.on("request", (request) => {
+    if (/^\/api\/lobby\/[^/]+\/dossier$/.test(new URL(request.url()).pathname)) {
+      requests.push(request.method());
+    }
+  });
+  return requests;
+}
+
+async function openCharacter(page: Page, index: number) {
+  const responsePromise = page.waitForResponse((response) =>
+    /^\/api\/lobby\/[^/]+\/dossier$/.test(new URL(response.url()).pathname) &&
+    response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "My Character", exact: true }).click();
+  const response = await responsePromise;
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toContain("no-store");
+  expect(await response.json()).toEqual(expectedDossier(index));
+
+  const fixture = syntheticMysteryPackage();
+  const own = fixture.startingDossiers[index];
+  for (const text of [own.biography, ...own.interpersonalPrompts, ...own.relationships.map((r) => r.perspective)]) {
+    await expect(page.getByText(text, { exact: true })).toBeVisible();
+  }
+  const content = await page.content();
+  for (let other = 0; other < fixture.startingDossiers.length; other++) {
+    if (other !== index) expect(content).not.toContain(`${SYNTHETIC_SENTINELS.dossier}-${other + 1} `);
+  }
+  for (const sentinel of [SYNTHETIC_SENTINELS.briefing, SYNTHETIC_SENTINELS.item,
+    SYNTHETIC_SENTINELS.objective, SYNTHETIC_SENTINELS.solution]) {
+    expect(content).not.toContain(sentinel);
+  }
 }
 
 async function dossier(page: Page, partyPath: string, origin = "http://127.0.0.1:3000") {
@@ -245,6 +282,147 @@ function expectedDossier(index: number) {
     },
   };
 }
+
+test("My Character is on demand, principal-scoped, and invalidated by lobby changes", async ({ browser }, testInfo) => {
+  const { ref, publicPackage } = await publishSyntheticPackage();
+  const mobile = testInfo.project.name === "integration-mobile";
+  const contexts: BrowserContext[] = [];
+  const hostContext = await testContext(browser, mobile);
+  contexts.push(hostContext);
+  const hostRequests = watchDossierRequests(hostContext);
+  const hostPage = await hostContext.newPage();
+  const assertHostNoPrivate = watchPublicResponses(hostPage);
+  let releaseDelayed: (() => void) | undefined;
+  try {
+    await signIn(hostPage);
+    activateLocal(ref);
+    const party = await createParty(hostPage, "Synthetic Published Lobby");
+    const guest = await joinAsGuest(browser, party.code, "Character Guest", mobile);
+    contexts.push(guest.context);
+    const other = await joinAsGuest(browser, party.code, "Other Guest", mobile);
+    contexts.push(other.context);
+    await expect(hostPage.getByRole("heading", { name: "Players (2/8)" })).toBeVisible({ timeout: 15_000 });
+    await expect(guest.page.getByRole("button", { name: "My Character", exact: true })).toHaveCount(0);
+    await expect(other.page.getByRole("button", { name: "My Character", exact: true })).toHaveCount(0);
+
+    const row = (name: string) => hostPage.getByRole("list").filter({
+      has: hostPage.getByRole("button", { name: "Save assignment" }),
+    }).getByRole("listitem").filter({ has: hostPage.getByText(name, { exact: true }) });
+    const guestRow = row("Character Guest");
+    const otherRow = row("Other Guest");
+    await guestRow.getByLabel("Assigned public character").selectOption(publicPackage.characters[0].id);
+    await guestRow.getByRole("button", { name: "Save assignment" }).click();
+    await expect(guestRow.getByRole("status")).toContainText("Character assignment updated.");
+    await otherRow.getByLabel("Assigned public character").selectOption(publicPackage.characters[1].id);
+    await otherRow.getByRole("button", { name: "Save assignment" }).click();
+    await expect(otherRow.getByRole("status")).toContainText("Character assignment updated.");
+    await hostPage.getByLabel("Player display name").fill("Playing Host");
+    await hostPage.getByRole("button", { name: "Join as a player" }).click();
+    await expect(hostPage.getByText("You are enrolled as a player.")).toBeVisible();
+    const hostRow = row("Playing Host (host)");
+    await hostRow.getByLabel("Assigned public character").selectOption(publicPackage.characters[2].id);
+    await hostRow.getByRole("button", { name: "Save assignment" }).click();
+    await expect(hostRow.getByRole("status")).toContainText("Character assignment updated.");
+    await expect(guest.page.getByRole("heading", { name: publicPackage.characters[0].publicName }))
+      .toBeVisible({ timeout: 15_000 });
+    await expect(other.page.getByRole("heading", { name: publicPackage.characters[1].publicName }))
+      .toBeVisible({ timeout: 15_000 });
+
+    expect(guest.requests).toEqual([]);
+    expect(other.requests).toEqual([]);
+    expect(hostRequests).toEqual([]);
+    await openCharacter(guest.page, 0);
+    expect(guest.requests).toEqual(["POST"]);
+    await guest.page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toHaveCount(0);
+    await openCharacter(guest.page, 0);
+    expect(guest.requests).toEqual(["POST", "POST"]);
+    await openCharacter(other.page, 1);
+    await openCharacter(hostPage, 2);
+    expect(other.requests).toEqual(["POST"]);
+    expect(hostRequests).toEqual(["POST"]);
+    await guest.page.getByRole("button", { name: "Close", exact: true }).click();
+    await other.page.getByRole("button", { name: "Close", exact: true }).click();
+    await hostPage.getByRole("button", { name: "Close", exact: true }).click();
+
+    // Hold a real, authorized response until the server has reassigned the guest.
+    let responseReady!: () => void;
+    let responseFailed!: (error: unknown) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+      responseReady = resolve;
+      responseFailed = reject;
+    });
+    const gate = new Promise<void>((resolve) => { releaseDelayed = resolve; });
+    let responseFinished!: () => void;
+    const finished = new Promise<void>((resolve) => { responseFinished = resolve; });
+    const dossierRoute = `**/api/lobby/${party.partyPath.split("/").pop()}/dossier`;
+    await guest.page.route(dossierRoute, async (route) => {
+      try {
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toEqual(expectedDossier(0));
+        responseReady();
+        await gate;
+        await route.fulfill({ response }).catch(() => {});
+      } catch (error) {
+        responseFailed(error);
+      } finally {
+        responseFinished();
+      }
+    });
+    await guest.page.getByRole("button", { name: "My Character", exact: true }).click();
+    await ready;
+    await guestRow.getByLabel("Assigned public character").selectOption(publicPackage.characters[3].id);
+    await guestRow.getByLabel("I confirm changing or clearing this assigned character.").check();
+    await guestRow.getByRole("button", { name: "Save assignment" }).click();
+    await expect(guestRow.getByRole("status")).toContainText("Character assignment updated.");
+    await guest.page.getByRole("button", { name: "Refresh assignment" }).click();
+    await expect(guest.page.getByRole("heading", { name: publicPackage.characters[3].publicName }))
+      .toBeVisible({ timeout: 15_000 });
+    releaseDelayed!();
+    await finished;
+    await guest.page.unroute(dossierRoute);
+    await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toHaveCount(0);
+    await openCharacter(guest.page, 3);
+
+    await guestRow.getByLabel("I have deliberately confirmed this guest’s identity out of band.").check();
+    await guestRow.getByRole("button", { name: "Start guest recovery" }).click();
+    const token = await guestRow.getByTestId("recovery-credential").textContent();
+    if (!token) throw new Error("Recovery credential unavailable");
+    const recoveredContext = await testContext(browser, mobile);
+    contexts.push(recoveredContext);
+    const recoveredRequests = watchDossierRequests(recoveredContext);
+    const recoveredPage = await recoveredContext.newPage();
+    await recoveredPage.goto("/join");
+    await recoveredPage.getByRole("button", { name: "Lost access to your guest session? Recover it" }).click();
+    await recoveredPage.getByLabel("Recovery credential").fill(token);
+    await expect(recoveredPage.getByRole("button", { name: "Recover membership" })).toBeEnabled();
+    await recoveredPage.getByRole("button", { name: "Recover membership" }).click();
+    await expect(recoveredPage.getByText("Your display name: Character Guest")).toBeVisible();
+    expect(recoveredRequests).toEqual([]);
+    await expect(guest.page.getByText("This browser no longer has access to that lobby. Ask the host for help."))
+      .toBeVisible({ timeout: 15_000 });
+    await expect(guest.page.getByText("SENTINEL-DOSSIER-4 placeholder biography.", { exact: true })).toHaveCount(0);
+    await openCharacter(recoveredPage, 3);
+    await guestRow.getByLabel("I confirm removing this participant before the game starts.").check();
+    await guestRow.getByRole("button", { name: "Remove participant" }).click();
+    await expect(hostPage.getByRole("heading", { name: "Players (2/8)" })).toBeVisible();
+    await expect(recoveredPage.getByText("This browser no longer has access to that lobby. Ask the host for help."))
+      .toBeVisible({ timeout: 15_000 });
+    await expect(recoveredPage.getByText("SENTINEL-DOSSIER-4 placeholder biography.", { exact: true })).toHaveCount(0);
+    await assertHostNoPrivate(await hostPage.content());
+    await guest.assertNoPrivate(await guest.page.content());
+    await other.assertNoPrivate(await other.page.content());
+  } finally {
+    releaseDelayed?.();
+    execFileSync("docker", [
+      "exec", "supabase_db_one-killer-party", "psql", "-X", "-v", "ON_ERROR_STOP=1",
+      "-U", "postgres", "-d", "postgres", "-c",
+      "UPDATE private_mystery.active_version SET mystery_id=NULL,version=NULL,schema_version=NULL,digest_sha256=NULL WHERE singleton",
+    ], { stdio: ["ignore", "ignore", "ignore"] });
+    for (const context of contexts) await context.close().catch(() => {});
+  }
+});
 
 test("activated published and legacy lobbies render and synchronize without private content", async ({ browser }, testInfo) => {
   const { ref, publicPackage } = await publishSyntheticPackage();

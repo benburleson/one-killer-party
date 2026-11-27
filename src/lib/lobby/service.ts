@@ -7,7 +7,7 @@ import { validPartyId, verifiedEmailHost, verifier } from "@/lib/host/core";
 import { serviceRoleClient } from "@/lib/supabase/service-client";
 import { publishedVersionRefSchema } from "@/lib/mystery-content/schema";
 import { loadPublishedPublicMystery } from "@/lib/mystery-content/trusted-loader";
-import { generateRecoveryToken, recoveryTokenVerifier, validRecoveryToken } from "./core";
+import { coherentGuestRevision, committedGuestResult, generateRecoveryToken, recoveryTokenVerifier, validRecoveryToken } from "./core";
 import {
   BLACKWOOD_PUBLIC_CHARACTERS,
   isBlackwoodPackage,
@@ -23,6 +23,8 @@ export type GuestMembership = {
   displayName: string;
   status: string;
   participantCount: number;
+  version: number;
+  dossierAvailable: boolean;
   assignedCharacterId: PublicCharacterId | null;
   assignedCharacter: PublicCharacterCard | null;
 };
@@ -34,7 +36,7 @@ export type HostParticipant = {
   assignedCharacter: PublicCharacterCard | null;
 };
 
-function membership(row: unknown, characters: readonly PublicCharacter[]): GuestMembership | null {
+function membership(row: unknown, characters: readonly PublicCharacter[], dossierAvailable: boolean, version: number): GuestMembership | null {
   if (!row || typeof row !== "object") return null;
   const value = row as Row;
   if (!validPartyId(value.party_id) || !validPartyId(value.participant_id) ||
@@ -51,6 +53,8 @@ function membership(row: unknown, characters: readonly PublicCharacter[]): Guest
     displayName: value.display_name,
     status: value.status,
     participantCount: value.participant_count,
+    version,
+    dossierAvailable,
     assignedCharacterId: assignedCharacter?.id ?? null,
     assignedCharacter: assignedCharacter ?? null,
   };
@@ -72,7 +76,17 @@ export async function syncUser() {
     throw new Error("Authentication unavailable");
   }
   if (!data.user || !validPartyId(data.user.id)) return null;
-  return { id: data.user.id, isHost: verifiedEmailHost(data.user) !== null };
+  const session = await client.auth.getSession();
+  const token = session.data.session?.access_token;
+  if (session.error || !token) throw new Error("Authentication unavailable");
+  const claims = await client.auth.getClaims(token);
+  if (claims.error || claims.data?.claims.sub !== data.user.id ||
+      !validPartyId(claims.data?.claims.session_id)) throw new Error("Authentication unavailable");
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) throw new Error("Authentication unavailable");
+  const context = createHmac("sha256", serviceKey)
+    .update(`lobby-sync:${data.user.id}:${claims.data.claims.session_id}`).digest("hex");
+  return { id: data.user.id, isHost: verifiedEmailHost(data.user) !== null, context };
 }
 
 export function rateBucketHash(scope: string, principal: string, forwardedFor: string | null) {
@@ -101,7 +115,8 @@ export function lobbyService() {
     }
     if (isBlackwoodPackage(pin.mystery_id, pin.mystery_version) &&
         pin.schema_version === null && pin.digest_sha256 === null) {
-      return { title: "Blackwood Affair", characters: BLACKWOOD_PUBLIC_CHARACTERS };
+      return { title: "Blackwood Affair", characters: BLACKWOOD_PUBLIC_CHARACTERS, dossierAvailable: false,
+        pin: { schemaVersion: null, digestSha256: null } };
     }
     const ref = publishedVersionRefSchema.safeParse({
       mysteryId: pin.mystery_id, version: pin.mystery_version,
@@ -110,15 +125,27 @@ export function lobbyService() {
     if (!ref.success) throw new Error("Lobby command unavailable");
     const loaded = await loadPublishedPublicMystery(ref.data);
     if (!loaded.ok) throw new Error("Lobby command unavailable");
-    return loaded.projection;
+    return { ...loaded.projection, dossierAvailable: true,
+      pin: { schemaVersion: ref.data.schemaVersion, digestSha256: ref.data.digestSha256 } };
   }
   async function projectMembership(row: unknown, principal: string) {
     if (!row || typeof row !== "object" || !validPartyId((row as Row).party_id)) {
       throw new Error("Lobby command unavailable");
     }
     const value = row as Row;
-    const catalog = await publicCatalog(principal, value.party_id as string, value);
-    const result = membership(row, catalog.characters);
+    const args = { p_party_id: value.party_id, p_principal_id: principal };
+    const before = await call("get_dossier_authorization_snapshot", args);
+    const fresh = await call("get_guest_membership", { p_principal: principal });
+    if (!Array.isArray(fresh)) throw new Error("Lobby command unavailable");
+    const matches = fresh.filter((item: unknown) => item && typeof item === "object" &&
+      (item as Row).party_id === value.party_id && (item as Row).participant_id === value.participant_id);
+    if (matches.length !== 1) throw new Error("Lobby command unavailable");
+    const current = matches[0] as Row;
+    const catalog = await publicCatalog(principal, value.party_id as string, current);
+    const after = await call("get_dossier_authorization_snapshot", args);
+    const version = coherentGuestRevision(before, after, current, principal, catalog.pin);
+    if (version === null) throw new Error("Lobby command unavailable");
+    const result = membership(current, catalog.characters, catalog.dossierAvailable, version);
     if (!result) throw new Error("Lobby command unavailable");
     return result;
   }
@@ -139,7 +166,7 @@ export function lobbyService() {
       });
       if (!Array.isArray(data) || data.length !== 1) return null;
       const row = data[0] as Row;
-      return row.outcome === "joined" ? projectMembership({
+      return row.outcome === "joined" ? committedGuestResult("joined", () => projectMembership({
         party_id: row.party_id,
         participant_id: row.participant_id,
         display_name: row.display_name,
@@ -148,7 +175,7 @@ export function lobbyService() {
         assigned_character_id: null,
         mystery_id: row.mystery_id,
         mystery_version: row.mystery_version,
-      }, principal) : { outcome: row.outcome === "full" ? "full" : "unavailable" } as const;
+      }, principal)) : { outcome: row.outcome === "full" ? "full" : "unavailable" } as const;
     },
     async myMemberships(principal: string): Promise<GuestMembership[]> {
       if ((await signedInUser())?.id !== principal) throw new Error("Lobby command unavailable");
@@ -161,6 +188,7 @@ export function lobbyService() {
       mysteryId: string;
       title: string;
       characters: readonly PublicCharacter[];
+      dossierAvailable: boolean;
       participants: HostParticipant[];
       version: number;
     }> {
@@ -202,6 +230,7 @@ export function lobbyService() {
         mysteryId: party.mystery_id as string,
         title: catalog.title,
         characters: catalog.characters,
+        dossierAvailable: catalog.dossierAvailable,
         participants,
         version: rosterVersion,
       };
@@ -276,10 +305,12 @@ export function lobbyService() {
       });
       if (!Array.isArray(data) || data.length !== 1) return null;
       const row = data[0] as Row;
-      if (row.outcome !== "recovered" || !validPartyId(row.party_id) ||
-          !validPartyId(row.participant_id)) return null;
-      return (await guestMemberships(principal)).find((item) =>
-        item.partyId === row.party_id && item.participantId === row.participant_id) ?? null;
+      if (row.outcome !== "recovered") return null;
+      return committedGuestResult("recovered", async () => {
+        if (!validPartyId(row.party_id) || !validPartyId(row.participant_id)) return null;
+        return (await guestMemberships(principal)).find((item) =>
+          item.partyId === row.party_id && item.participantId === row.participant_id) ?? null;
+      });
     },
   };
 }
