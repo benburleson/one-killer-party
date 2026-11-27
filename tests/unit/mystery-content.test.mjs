@@ -516,7 +516,9 @@ test("the content module is pure and only wired into trusted server code", () =>
     .map((name) => name.replaceAll("\\", "/"))
     .filter((name) => /\.tsx?$/.test(name) && !name.startsWith("lib/mystery-content/"))
     .filter((name) => /mystery-content/.test(readFileSync(new URL(name, srcUrl), "utf8")));
-  assert.deepEqual(importers.sort(), ["lib/host/core.ts", "lib/host/service.ts", "lib/lobby/service.ts"]);
+  assert.deepEqual(importers.sort(), [
+    "app/api/lobby/[partyId]/dossier/route.ts", "lib/host/core.ts", "lib/host/service.ts", "lib/lobby/service.ts",
+  ]);
   for (const name of importers) {
     assert.doesNotMatch(readFileSync(new URL(name, srcUrl), "utf8"), /^"use client";$/m);
   }
@@ -524,4 +526,7 @@ test("the content module is pure and only wired into trusted server code", () =>
   const trustedLoader = readFileSync(new URL("trusted-loader.ts", moduleUrl), "utf8");
   assert.match(trustedLoader, /^import "server-only";$/m);
   assert.doesNotMatch(trustedLoader, /console\.|signedUrl|createSignedUrl/i);
+  const dossier = readFileSync(new URL("dossier.ts", moduleUrl), "utf8");
+  assert.match(dossier, /^import "server-only";$/m);
+  assert.doesNotMatch(dossier, /console\.|signedUrl|createSignedUrl/i);
 });
