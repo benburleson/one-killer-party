@@ -6,7 +6,7 @@ which results are owner attestation, is recorded only in
 [production operations](../production-operations.md). All **automated tests**
 use disposable local Supabase only.
 
-For the **accepted design boundary** between lobby state and future private content, see
+For the **accepted design boundary** between lobby state and private content, see
 [mystery content architecture](mystery-content-architecture.md): private immutable object packages, restricted Postgres registry and party/release state, with server-only authorized projections. Decisions D-026–D-028 do not change the current lobby or authorize private publication.
 
 ## Schema boundary
@@ -106,17 +106,15 @@ to that credential permits impersonation and must be restricted accordingly.
   and party version. Guest reads return only the authenticated caller's own
   public assignment. The server validates the package pin before projecting
   catalog labels; service-role RPCs remain inaccessible to browser roles.
-  Role assignment is `LOBBY`-only. There is no game-start state, dossier
-  access, clue release or solution data.
+  Role assignment is `LOBBY`-only. The separate on-demand dossier boundary
+  is participant-only; these host and guest lobby projections do not contain
+  dossiers. There is no game-start state, clue release or solution delivery.
 
-**Seams for private content (not implemented).** The server reads the pin
-from the database on every projection (`get_host_party`,
-`get_guest_membership`, `join_party`) and validates it in
-`public-characters.ts`; `src/lib/supabase/service-client.ts` is the single
-service-role entry point. Still hard-coded to the placeholder:
-`create_host_party` (the pin it writes), `assign_public_character` (the eight
-IDs and the pin check) and the Blackwood capacity of eight. Those change with
-the published-version registry, not before.
+**Private content boundary.** Published parties retain their complete immutable
+pin; public projections use that pin rather than the active version. A separate
+server-only participant authorization and dossier projection is described in
+the [dossier delivery contract](mystery-content-architecture.md#dossier-delivery).
+Legacy placeholder parties do not have private dossiers.
 
 O-025's backup/restore, retention and preview isolation decisions are not
 settled. D-026–D-028 settle future private storage, preserved content versions
@@ -156,8 +154,8 @@ host's change. Since the version does not identify which operation changed
 the party, a displayed rotated invitation is hidden conservatively after any
 later version change: it may have been replaced, even if the change was only
 an admission or assignment. The host can issue a fresh code if needed.
-This does not resolve O-025–O-027 or add post-lobby gameplay, private dossiers,
-or clue delivery.
+This polling does not resolve O-025–O-027 or deliver private dossiers, post-lobby
+gameplay, or clues.
 
 ## Invitation lifecycle
 
@@ -327,6 +325,6 @@ Reviewers should confirm:
   reviewed independently of browser-side authorization.
 
 
-## Approved M2.2 extension (not implemented)
+## M2.2 extension
 
-The [M2.2 architecture](mystery-content-architecture.md#m22--approved-private-dossier-delivery-2026-11-26) specifies the active published-version pointer, exact immutable party pin, transactional creation and public roster projection changes, capacity and assignment compatibility, and participant-only dossier authorization. Existing schema and commands above describe implemented behavior until the corresponding migrations and services land. No authored text is persisted in lobby tables.
+The [M2.2 architecture](mystery-content-architecture.md#m22--approved-private-dossier-delivery-2026-11-26) describes published-version activation, immutable party pins, transactional creation, public roster projection and participant-only dossier authorization. No authored text is persisted in lobby tables. Dossier UI and lifecycle reconciliation remain separate work.

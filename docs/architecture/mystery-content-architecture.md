@@ -1,16 +1,18 @@
 # Versioned mystery content and spoiler-safe projections
 
-**Accepted architecture (D-026–D-028).** The private immutable package and registry, MFA-guarded Production publisher and synthetic rehearsal are implemented. The application still supports **LOBBY only**; character-specific dossier delivery and game progression remain future work. This document is a design contract, **not** permission to publish real story content or expose a full package to players. Read [Production operations](../production-operations.md) for live configuration and maintenance, and the [package contract](mystery-content-package.md) for actual implementation details.
+**Accepted architecture (D-026–D-028).** The private immutable package and registry, MFA-guarded Production publisher and synthetic rehearsal are implemented. The application still supports **LOBBY only**; the own-dossier server boundary exists, but its player UI and game progression remain future work. This document is a design contract, **not** permission to publish real story content or expose a full package to players. Read [Production operations](../production-operations.md) for live configuration and maintenance, and the [package contract](mystery-content-package.md) for actual implementation details.
 
 ## Context and trust boundaries
 
 The current app is `LOBBY` only. The server-only
 [`public-characters.ts`](../../src/lib/lobby/public-characters.ts) contains
-eight public identities, not private packages. Party creation pins
+eight public identities, not private packages. Legacy parties pin
 `blackwood-affair` / `first-playtest-placeholder-v1`; assignment migrations
-register those public IDs. [Lobby persistence](lobby-persistence.md) describes
-service-role RPCs, authenticated polling, removal and recovery. No dossier,
-release engine or reveal exists today. Production status is recorded in
+register those public IDs. New published parties use their immutable package
+pin. [Lobby persistence](lobby-persistence.md) describes service-role RPCs,
+authenticated polling, removal and recovery. The dossier request boundary is
+implemented without a UI; no release engine or reveal exists today. Production
+status is recorded in
 [production operations](../production-operations.md).
 
 **Public source is a separate boundary from runtime access.** The public
@@ -186,6 +188,23 @@ Adapt all placeholder-specific reads, assignment restrictions and capacity check
 Reuse the trusted loader and separate server-only allowlisted response types. Verify the current Auth principal and obtain a party-scoped membership/assignment/phase/pin snapshot from a service-only read. Require an enrolled assigned participant in LOBBY with a published pin. After asynchronous package verification, repeat authorization and compare the relevant snapshot (including party version to detect intervening changes); deny or retry safely on mismatch. No character ID supplied by the caller selects private content. A playing host uses this same participant path. Host operations never contain private dossiers.
 
 Construct only the assigned public identity, starting biography, relationship perspectives with public labels and interpersonal prompts; never spread the full definition or branch on murderer identity. No act items, objectives, briefing, solution, private object locator or registry metadata in browser responses. Fetch on deliberate My Character open, not in lobby polling or prefetch. No persistent package cache in this slice; all personalized delivery is private/no-store and dynamic. Reuse existing polling for invalidation, discard late responses, clear private view on authorization/assignment changes and revalidate on foreground/reconnect/back navigation. Do not retain offline dossier access. Reassignment and removal remain permitted with a warning that previously read secrets cannot be recalled. Recovery rebinds the same participant and assignment; old principal loses subsequent reads even with a valid JWT. No read receipts or additional readiness state.
+
+The on-demand boundary is `POST /api/lobby/[partyId]/dossier`, with an exact
+`Origin` matching `APP_URL` and a verified Supabase session cookie. It uses no
+body fields (any body is ignored), and never accepts a character or principal
+selector. Success returns `{ dossier: { character: { id, publicName, archetype,
+description }, biography, relationships: [{ characterId, publicName,
+perspective }], interpersonalPrompts } }`. Denials and unavailable content
+return `404` and `{ error: "Dossier unavailable" }`; origin mismatch returns
+the same error with `403`. Explicitly unsupported methods return `405`, and
+`OPTIONS` returns `204` with `Allow: POST, OPTIONS`. All these responses have
+`Cache-Control: private, no-store, max-age=0`. The implementation is in
+[`dossier.ts`](../../src/lib/mystery-content/dossier.ts) and its
+[`route.ts`](../../src/app/api/lobby/%5BpartyId%5D/dossier/route.ts).
+The service-only snapshot RPC joins membership and party state in one database
+statement because the existing membership and pin reads are separate snapshots.
+Its migration must be applied through the normal owner-controlled deployment
+gate; this change does not authorize a Production migration or publication.
 
 ### Delivery sequence and acceptance
 

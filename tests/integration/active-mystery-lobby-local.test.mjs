@@ -27,6 +27,17 @@ test("local published versions create pinned lobbies and project only public met
     ...options, global: { headers: { Authorization: "Bearer " + token } },
   });
   const runtime = createClient(status.API_URL, status.SERVICE_ROLE_KEY, options);
+  const guestUnsigned = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({
+    aud: "authenticated", exp: now + 300, iat: now, iss: "supabase", role: "authenticated",
+    sub: "00000000-0000-4000-8000-000000000002",
+  })}`;
+  const guestToken = `${guestUnsigned}.${createHmac("sha256", status.JWT_SECRET).update(guestUnsigned).digest("base64url")}`;
+  const browserClients = [
+    createClient(status.API_URL, status.ANON_KEY, options),
+    createClient(status.API_URL, status.ANON_KEY, {
+      ...options, global: { headers: { Authorization: "Bearer " + guestToken } },
+    }),
+  ];
   const approvedAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 300000).toISOString();
   const authorization = {
@@ -85,6 +96,8 @@ test("local published versions create pinned lobbies and project only public met
   const firstCode = generateCode();
   let secondCode = generateCode();
   while (secondCode === firstCode) secondCode = generateCode();
+  let legacyCode = generateCode();
+  while (legacyCode === firstCode || legacyCode === secondCode) legacyCode = generateCode();
   const joinBucket = `\\x${randomBytes(32).toString("hex")}`;
   const psql = (sql) => execFileSync("docker", ["exec", "supabase_db_one-killer-party", "psql",
     "-X", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-c", sql],
@@ -102,7 +115,28 @@ test("local published versions create pinned lobbies and project only public met
     rpc: async (name, args) => runtime.rpc(name, args),
     loadPublic: (ref) => loadTrustedPublicMystery(ref, store),
   });
+  const snapshot = async (partyId, principal) => {
+    const result = await runtime.rpc("get_dossier_authorization_snapshot", {
+      p_party_id: partyId, p_principal_id: principal,
+    });
+    assert.equal(result.error, null);
+    return result.data;
+  };
   try {
+    const legacyParty = randomUUID();
+    const legacyService = hostService({
+      user: async () => host, code: () => legacyCode, rpc: async (name, args) => runtime.rpc(name, args),
+      loadPublic: (ref) => loadTrustedPublicMystery(ref, store),
+    });
+    assert.equal((await legacyService.create(legacyParty)).kind, "issued");
+    const legacyEnrollment = await runtime.rpc("enroll_host_participant", {
+      p_host: host, p_party_id: legacyParty, p_display_name: "Legacy host",
+    });
+    assert.equal(legacyEnrollment.data[0].outcome, "joined");
+    const legacySnapshot = (await snapshot(legacyParty, host))[0];
+    assert.equal(legacySnapshot.mystery_id, "blackwood-affair");
+    assert.equal(legacySnapshot.mystery_version, "first-playtest-placeholder-v1");
+    assert.equal(legacySnapshot.digest_sha256, null);
     activate(first.ref);
     const party1 = randomUUID();
     assert.equal((await service.create(party1)).kind, "issued");
@@ -135,16 +169,32 @@ test("local published versions create pinned lobbies and project only public met
     });
     assert.equal(joined.error, null);
     assert.equal(joined.data[0].outcome, "joined");
+    assert.equal((await snapshot(party1, guest))[0].assigned_character_id, null);
+    assert.deepEqual(await snapshot(party1, host), []);
+    assert.deepEqual(await snapshot(party2, guest), []);
+    for (const browser of browserClients) {
+      const denied = await browser.rpc("get_dossier_authorization_snapshot", {
+        p_party_id: party1, p_principal_id: guest,
+      });
+      assert.ok(denied.error);
+      assert.equal(denied.data, null);
+    }
     const assigned = await runtime.rpc("assign_public_character", {
       p_host: host, p_party_id: party1, p_participant_id: joined.data[0].participant_id,
       p_character_id: "role-1", p_expected_version: 1, p_confirm_change: false,
     });
     assert.equal(assigned.error, null);
     assert.equal(assigned.data[0].outcome, "changed");
+    const guestSnapshot = (await snapshot(party1, guest))[0];
+    assert.equal(guestSnapshot.participant_id, joined.data[0].participant_id);
+    assert.equal(guestSnapshot.assigned_character_id, "role-1");
+    assert.equal(guestSnapshot.mystery_version, "v1");
+    assert.equal(guestSnapshot.digest_sha256, first.ref.digestSha256);
     const enrolled = await runtime.rpc("enroll_host_participant", {
       p_host: host, p_party_id: party1, p_display_name: "Playing host",
     });
     assert.equal(enrolled.data[0].outcome, "joined");
+    assert.equal((await snapshot(party1, host))[0].assigned_character_id, null);
     const members = [];
     for (const principal of extraGuests.slice(0, 6)) {
       const result = await runtime.rpc("join_party", {
@@ -171,11 +221,13 @@ test("local published versions create pinned lobbies and project only public met
     assert.equal(await assign(members[0], "role-2", 8, false), "conflict");
     assert.equal(await assign(joined.data[0].participant_id, null, 9, false), "confirmation_required");
     assert.equal(await assign(joined.data[0].participant_id, null, 9, true), "changed");
+    assert.equal((await snapshot(party1, guest))[0].assigned_character_id, null);
     assert.equal(await assign(members[0], "role-1", 10, false), "changed");
     const removed = await runtime.rpc("remove_host_participant", {
       p_host: host, p_party_id: party1, p_participant_id: joined.data[0].participant_id,
     });
     assert.equal(removed.data, true);
+    assert.deepEqual(await snapshot(party1, guest), []);
     const recoveryHash = `\\x${randomBytes(32).toString("hex")}`;
     const bucket = `\\x${randomBytes(32).toString("hex")}`;
     const issued = await runtime.rpc("initiate_participant_recovery", {
@@ -187,6 +239,11 @@ test("local published versions create pinned lobbies and project only public met
       p_new_principal: recoveryPrincipal, p_verifier_hash: recoveryHash, p_rate_bucket_hash: bucket,
     });
     assert.equal(recovered.data[0].outcome, "recovered");
+    assert.deepEqual(await snapshot(party1, extraGuests[0]), []);
+    const recoveredSnapshot = (await snapshot(party1, recoveryPrincipal))[0];
+    assert.equal(recoveredSnapshot.participant_id, members[0]);
+    assert.equal(recoveredSnapshot.assigned_character_id, "role-1");
+    assert.equal(recoveredSnapshot.digest_sha256, first.ref.digestSha256);
     const membership = await runtime.rpc("get_guest_membership", { p_principal: recoveryPrincipal });
     assert.equal(membership.data[0].assigned_character_id, "role-1");
     assert.equal(membership.data[0].mystery_version, "v1");

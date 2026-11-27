@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { configureTurnstile, requestMagicLink, signIn, verifiedSubmit } from "./local-auth";
 import { isolateLocalRateLimits, localJoinRateLimited } from "./local-isolation";
 
 test.beforeEach(isolateLocalRateLimits);
@@ -16,93 +16,10 @@ async function admissionCategory(page: Page): Promise<string> {
   return "timeout";
 }
 
-// Local Supabase has CAPTCHA disabled; emulate only Cloudflare's browser-side
-// widget/token issuance. This isolates the guest recovery race test from external
-// challenge script latency, without mocking Supabase, HTTP auth or database RPCs.
-// The dummy token is public and never a production credential.
-const localTurnstileScript = `
-(() => {
-  const active = new Map();
-  let nextId = 0;
-  const dummy = "XXXX.DUMMY.TOKEN.XXXX";
-  window.turnstile = {
-    render(element, options) {
-      const id = String(++nextId);
-      active.set(id, options);
-      element.setAttribute("data-test-turnstile", options.action || "");
-      queueMicrotask(() => { if (active.has(id)) options.callback(dummy); });
-      return id;
-    },
-    reset(id) {
-      const options = active.get(id);
-      if (options) queueMicrotask(() => { if (active.has(id)) options.callback(dummy); });
-    },
-    remove(id) { active.delete(id); },
-  };
-})();
-`;
-
-async function configureTurnstile(context: BrowserContext) {
-  await context.route("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/javascript",
-      body: localTurnstileScript,
-    });
-  });
-}
 async function newTestContext(browser: Browser) {
   const context = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
   await configureTurnstile(context);
   return context;
-}
-
-// The local mail capture service (Mailpit in the current Supabase CLI) and
-// GoTrue are disposable. Never include message bodies or links in test output.
-async function verifiedSubmit(page: Page, label: string) {
-  await expect(page.getByRole("button", { name: label })).toBeEnabled({ timeout: 30000 });
-  await page.getByRole("button", { name: label }).click();
-}
-
-async function requestMagicLink(page: Page) {
-  const mailbox = `host-${randomUUID()}`;
-  await page.goto("/host");
-  await page.getByLabel("Email address").fill(`${mailbox}@example.test`);
-  await verifiedSubmit(page, "Send sign-in link");
-  await expect(page.getByText("If sign-in is available, check your email for a link.")).toBeVisible();
-
-  let link: string | undefined;
-  for (let attempt = 0; attempt < 30 && !link; attempt++) {
-    const query = encodeURIComponent(`to:${mailbox}@example.test`);
-    const inbox = await fetch(`http://127.0.0.1:54324/api/v1/search?query=${query}`);
-    if (inbox.ok) {
-      const { messages } = await inbox.json() as { messages?: { ID: string }[] };
-      if (messages?.length) {
-        const message = await fetch(`http://127.0.0.1:54324/api/v1/message/${encodeURIComponent(messages[0].ID)}`);
-        if (message.ok) {
-          const data = await message.json() as { HTML?: string; Text?: string };
-          const body = data.HTML || data.Text || "";
-          link = body.match(/http:\/\/127\.0\.0\.1:54321\/auth\/v1\/verify\?[^"'\s<>]+/)?.[0]
-            ?.replaceAll("&amp;", "&");
-        }
-      }
-    }
-    if (!link) await page.waitForTimeout(1000);
-  }
-  if (!link) throw new Error("Local email was not received");
-  return link;
-}
-
-async function signIn(page: Page) {
-  const link = await requestMagicLink(page);
-  const url = new URL(link);
-  const redirect = new URL(url.searchParams.get("redirect_to") || "");
-  if (url.origin !== "http://127.0.0.1:54321" || url.pathname !== "/auth/v1/verify" ||
-      redirect.origin !== "http://127.0.0.1:3000" || redirect.pathname !== "/auth/callback") {
-    throw new Error("Unexpected local auth link");
-  }
-  await page.goto(url.href);
-  await expect(page.getByRole("button", { name: "Create a Blackwood Affair party" })).toBeVisible();
 }
 
 test("local host sign-in, party access, isolation and sign-out", async ({ page, browser }, testInfo) => {
