@@ -159,8 +159,11 @@ export function AssignCharacterForm({
   const router = useRouter();
   const [draft, setDraft] = useState<{ selected: string; version: number } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  // Feedback belongs to one submission; hide it once the host edits or resubmits.
+  const [feedbackVisible, setFeedbackVisible] = useState(true);
   const [state, action, pending] = useActionState(async (previous: LobbyActionState, form: FormData) => {
     const result = await assignCharacter(previous, form);
+    setFeedbackVisible(true);
     if (result.updated) {
       setDraft(null);
       setConfirmed(false);
@@ -189,6 +192,7 @@ export function AssignCharacterForm({
           onChange={(event) => {
             setDraft({ selected: event.target.value, version: draft?.version ?? version });
             setConfirmed(false);
+            setFeedbackVisible(false);
           }}
         >
           <option value="">Unassigned</option>
@@ -233,7 +237,7 @@ export function AssignCharacterForm({
       <button className={button} disabled={pending || stale || selectedOccupied || (replacing && !confirmed)}>
         Save assignment
       </button>
-      {state.message && <p role="status">{state.message}</p>}
+      {!pending && feedbackVisible && state.message && <p role="status">{state.message}</p>}
     </form>
   );
 }

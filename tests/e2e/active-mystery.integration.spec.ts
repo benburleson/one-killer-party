@@ -392,9 +392,19 @@ test("activated published and legacy lobbies render and synchronize without priv
 
     await publishedRow.getByLabel("Assigned public character").selectOption(publicPackage.characters[3].id);
     await publishedRow.getByLabel("I confirm changing or clearing this assigned character.").check();
+    await expect(publishedRow.getByRole("status")).toHaveCount(0);
     await publishedRow.getByRole("button", { name: "Save assignment" }).click();
     await expect(publishedRow.getByRole("status")).toContainText("Character assignment updated.");
-    expect(await dossier(guest.page, published.partyPath)).toEqual({ status: 200, body: expectedDossier(3) });
+    // Synchronize on the canonical roster, not retained form feedback, before one dossier read.
+    const publicRoster = hostPage.getByRole("list", { name: "Public character roster" });
+    const rosterCard = (index: number) => publicRoster.getByRole("listitem").filter({
+      has: hostPage.getByRole("heading", { name: publicPackage.characters[index].publicName, exact: true }),
+    });
+    await expect(rosterCard(3)).toContainText("Assigned to Published Guest");
+    await expect(rosterCard(0)).toContainText("Available");
+    const reassigned = await dossier(guest.page, published.partyPath);
+    expect(reassigned).toEqual({ status: 200, body: expectedDossier(3) });
+    expect(JSON.stringify(reassigned)).not.toContain("SENTINEL-DOSSIER-1 ");
 
     await publishedRow.getByLabel("I have deliberately confirmed this guest’s identity out of band.").check();
     await publishedRow.getByRole("button", { name: "Start guest recovery" }).click();
