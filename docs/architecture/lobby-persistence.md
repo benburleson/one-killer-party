@@ -126,12 +126,13 @@ safe dedicated Supabase project.
 
 The lobby uses authenticated, same-origin polling rather than Supabase
 Realtime. There is no channel, publication or browser table grant. Every host poll verifies the current host and
-party through the existing service-only roster RPCs and returns only the party
-version. A changed version triggers a fresh server-rendered, authorized roster
+party through the existing service-only roster RPCs and returns the party
+version and an opaque session-context fingerprint. A changed version triggers a fresh server-rendered, authorized roster
 read; the poll response is not a roster or a source of authority. Every guest
 poll verifies the current session and returns only that principal's existing
-guest membership projection and public assignment, never the host roster or
-credentials. Responses are private and non-cacheable. Knowing a party ID or
+guest membership projection, public assignment and party version, never the host roster or
+credentials. Both polls include the opaque fingerprint to detect session changes;
+it does not authorize dossier reads. Responses are private and non-cacheable. Knowing a party ID or
 invitation code does not grant host access.
 
 Visible, online lobbies poll at five-second intervals, with one active request,
@@ -154,8 +155,9 @@ host's change. Since the version does not identify which operation changed
 the party, a displayed rotated invitation is hidden conservatively after any
 later version change: it may have been replaced, even if the change was only
 an admission or assignment. The host can issue a fresh code if needed.
-This polling does not resolve O-025–O-027 or deliver private dossiers, post-lobby
-gameplay, or clues.
+This polling does not resolve O-025–O-027 or carry private dossiers, post-lobby
+gameplay, or clues. The separate on-demand dossier view uses polling to detect
+invalidation; polling does not authorize private content.
 
 ## Invitation lifecycle
 
@@ -327,4 +329,4 @@ Reviewers should confirm:
 
 ## M2.2 extension
 
-The [M2.2 architecture](mystery-content-architecture.md#m22--approved-private-dossier-delivery-2026-11-26) describes published-version activation, immutable party pins, transactional creation, public roster projection and participant-only dossier authorization. No authored text is persisted in lobby tables. Dossier UI and lifecycle reconciliation remain separate work.
+The [M2.2 architecture](mystery-content-architecture.md#m22--approved-private-dossier-delivery-2026-11-26) describes published-version activation, immutable party pins, transactional creation, public roster projection and participant-only dossier authorization. No authored text is persisted in lobby tables.

@@ -1,6 +1,6 @@
 # Versioned mystery content and spoiler-safe projections
 
-**Accepted architecture (D-026–D-028).** The private immutable package and registry, MFA-guarded Production publisher and synthetic rehearsal are implemented. The application still supports **LOBBY only**; the own-dossier server boundary exists, but its player UI and game progression remain future work. This document is a design contract, **not** permission to publish real story content or expose a full package to players. Read [Production operations](../production-operations.md) for live configuration and maintenance, and the [package contract](mystery-content-package.md) for actual implementation details.
+**Accepted architecture (D-026–D-028).** The private immutable package and registry, MFA-guarded Production publisher and synthetic rehearsal are implemented. The application still supports **LOBBY only**; assigned participants in published lobbies can open their own dossier, while game progression remains future work. This document is a design contract, **not** permission to publish real story content or expose a full package to players. Read [Production operations](../production-operations.md) for live configuration and maintenance, and the [package contract](mystery-content-package.md) for actual implementation details.
 
 ## Context and trust boundaries
 
@@ -201,6 +201,9 @@ the same error with `403`. Explicitly unsupported methods return `405`, and
 `Cache-Control: private, no-store, max-age=0`. The implementation is in
 [`dossier.ts`](../../src/lib/mystery-content/dossier.ts) and its
 [`route.ts`](../../src/app/api/lobby/%5BpartyId%5D/dossier/route.ts).
+The shared [My Character view](../../src/app/my-character.tsx) keeps the
+projection in transient view state and uses
+[lobby synchronization](../../src/app/lobby-sync.tsx) to reconcile access.
 The service-only snapshot RPC joins membership and party state in one database
 statement because the existing membership and pin reads are separate snapshots.
 Its migration must be applied through the normal owner-controlled deployment

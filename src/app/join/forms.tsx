@@ -6,6 +6,8 @@ import { joinParty, redeemRecovery, type GuestFormState } from "./actions";
 import { ClearFragment } from "./clear-fragment";
 import { TurnstileWidget } from "../turnstile-widget";
 import { useLobbySync } from "../lobby-sync";
+import { invalidatePrivateUI, MyCharacter } from "../my-character";
+import { membershipContextKey } from "../dossier-client";
 type GuestMembership = NonNullable<GuestFormState["membership"]>;
 
 const button = "rounded bg-amber-300 px-4 py-2 font-semibold text-gray-950 disabled:opacity-50";
@@ -16,7 +18,8 @@ function validMembership(value: unknown): value is GuestMembership {
   const item = value as Record<string, unknown>;
   if (typeof item.partyId !== "string" || typeof item.participantId !== "string" ||
       typeof item.displayName !== "string" || item.status !== "LOBBY" ||
-      !Number.isSafeInteger(item.participantCount)) return false;
+      !Number.isSafeInteger(item.participantCount) || !Number.isSafeInteger(item.version) ||
+      (item.version as number) < 0 || typeof item.dossierAvailable !== "boolean") return false;
   if (item.assignedCharacterId === null) return item.assignedCharacter === null;
   if (typeof item.assignedCharacterId !== "string" ||
       !item.assignedCharacter || typeof item.assignedCharacter !== "object") return false;
@@ -25,7 +28,7 @@ function validMembership(value: unknown): value is GuestMembership {
     typeof card.archetype === "string" && typeof card.description === "string";
 }
 
-function WaitingLobby({ membership, refresh }: { membership: GuestMembership; refresh: () => void }) {
+function WaitingLobby({ membership, refresh, validated, reconciliation }: { membership: GuestMembership; refresh: () => void; validated: boolean; reconciliation: number }) {
   return (
     <section className="mt-8 space-y-3 rounded border border-gray-600 p-4" aria-label="Your guest lobby">
       <h2 className="text-xl font-semibold">You’re in the lobby</h2>
@@ -39,6 +42,9 @@ function WaitingLobby({ membership, refresh }: { membership: GuestMembership; re
           <p>{membership.assignedCharacter.description}</p>
         </article>
       ) : <p>Waiting for the host to assign your character.</p>}
+      <MyCharacter partyId={membership.partyId} participantId={membership.participantId}
+        characterId={membership.assignedCharacterId} available={membership.dossierAvailable} validated={validated} reconciliation={reconciliation}
+        contextVersion={membership.version} />
       <button
         type="button"
         className="text-sm text-amber-300 underline"
@@ -138,8 +144,14 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
   const [memberships, setMemberships] = useState(existingMemberships);
   const [lostMembership, setLostMembership] = useState(false);
   const previousMembers = useRef(existingMemberships.map((membership) => membership.participantId));
+  const previousContexts = useRef(membershipContextKey(existingMemberships));
   const [recovering, setRecovering] = useState(false);
+  const [validated, setValidated] = useState(false);
+  const [reconciliation, setReconciliation] = useState(0);
   const joined = useCallback((membership: GuestMembership) => {
+    invalidatePrivateUI(true);
+    setValidated(false);
+    previousContexts.current = membershipContextKey([membership]);
     previousMembers.current = [membership.participantId];
     setLostMembership(false);
     setRecovering(false);
@@ -153,15 +165,21 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
         throw new Error("Invalid lobby snapshot");
       }
       const currentIds = data.memberships.map((membership) => membership.participantId);
+      const contexts = membershipContextKey(data.memberships);
+      if (previousContexts.current !== contexts) invalidatePrivateUI(true);
+      previousContexts.current = contexts;
       if (previousMembers.current.some((id) => !currentIds.includes(id))) setLostMembership(true);
       previousMembers.current = currentIds;
       setMemberships(data.memberships);
+      setValidated(true);
+      setReconciliation((value) => value + 1);
     },
     () => {
       setMemberships([]);
       setLostMembership(true);
       previousMembers.current = [];
     },
+    () => setValidated(false),
   );
   return (
     <>
@@ -171,7 +189,7 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
       {memberships.length ? (
         <div className="mt-8 space-y-4">
           {memberships.map((membership) => (
-            <WaitingLobby key={membership.participantId} membership={membership} refresh={refresh} />
+            <WaitingLobby key={membership.participantId} membership={membership} refresh={refresh} validated={validated} reconciliation={reconciliation} />
           ))}
         </div>
       ) : hostSession ? (

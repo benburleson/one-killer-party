@@ -6,7 +6,11 @@ export async function GET() {
     const user = await syncUser();
     if (!user) return new Response(null, { status: 401, headers });
     const memberships = await lobbyService().myMemberships(user.id);
-    return Response.json({ memberships }, { headers });
+    const confirmed = await syncUser();
+    if (!confirmed || confirmed.id !== user.id || confirmed.context !== user.context) {
+      return new Response(null, { status: 503, headers });
+    }
+    return Response.json({ memberships, context: user.context }, { headers });
   } catch {
     return new Response(null, { status: 503, headers });
   }

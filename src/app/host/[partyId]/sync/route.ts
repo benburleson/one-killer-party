@@ -7,7 +7,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     if (!user?.isHost) return new Response(null, { status: 401, headers });
     const { partyId } = await params;
     const roster = await lobbyService().hostRoster(user.id, partyId);
-    return Response.json({ version: roster.version }, { headers });
+    const confirmed = await syncUser();
+    if (!confirmed?.isHost || confirmed.id !== user.id || confirmed.context !== user.context) {
+      return new Response(null, { status: 503, headers });
+    }
+    return Response.json({ version: roster.version, context: user.context }, { headers });
   } catch {
     return new Response(null, { status: 503, headers });
   }
