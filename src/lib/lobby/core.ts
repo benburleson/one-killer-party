@@ -41,6 +41,17 @@ export function coherentGuestRevision(before: unknown, after: unknown, membershi
   return first.party_version as number;
 }
 
+export async function committedGuestResult<T>(
+  outcome: "joined" | "recovered",
+  project: () => Promise<T | null>,
+): Promise<{ outcome: "joined" | "recovered"; membership: T | null }> {
+  try {
+    return { outcome, membership: await project() };
+  } catch {
+    return { outcome, membership: null };
+  }
+}
+
 /**
  * Selects the header used as the rate-limit source address. Vercel overwrites
  * `x-vercel-forwarded-for`; `x-forwarded-for` is only trustworthy behind a

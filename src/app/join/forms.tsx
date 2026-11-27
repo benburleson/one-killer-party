@@ -8,6 +8,7 @@ import { TurnstileWidget } from "../turnstile-widget";
 import { useLobbySync } from "../lobby-sync";
 import { invalidatePrivateUI, MyCharacter } from "../my-character";
 import { membershipContextKey } from "../dossier-client";
+import { pendingLobbyStatus, type PendingLobbyKind } from "./guest-lobby-state";
 type GuestMembership = NonNullable<GuestFormState["membership"]>;
 
 const button = "rounded bg-amber-300 px-4 py-2 font-semibold text-gray-950 disabled:opacity-50";
@@ -60,10 +61,12 @@ function JoinForm({
   code,
   setCode,
   onJoined,
+  onPending,
 }: {
   code: string;
   setCode: (value: string) => void;
   onJoined: (membership: NonNullable<GuestFormState["membership"]>) => void;
+  onPending: (kind: "joined" | "recovered") => void;
 }) {
   const [state, action, pending] = useActionState(joinParty, {});
   const [verified, setVerified] = useState(false);
@@ -71,11 +74,14 @@ function JoinForm({
     if (state.membership) {
       setCode("");
       onJoined(state.membership);
+    } else if (state.projectionPending) {
+      setCode("");
+      onPending(state.projectionPending);
     }
-  }, [state.membership, setCode, onJoined]);
+  }, [state.membership, state.projectionPending, setCode, onJoined, onPending]);
   return (
     <>
-      {!state.membership && (
+      {!state.membership && !state.projectionPending && (
         <form action={action} className="mt-6 space-y-4">
           <label className="block">Eight-character invitation code
             <input
@@ -104,16 +110,19 @@ function JoinForm({
 
 function RecoveryForm({
   onRecovered,
+  onPending,
 }: {
   onRecovered: (membership: NonNullable<GuestFormState["membership"]>) => void;
+  onPending: (kind: "joined" | "recovered") => void;
 }) {
   const [state, action, pending] = useActionState(redeemRecovery, {});
   const [verified, setVerified] = useState(false);
   const [token, setToken] = useState("");
   useEffect(() => {
     if (state.membership) onRecovered(state.membership);
-  }, [state.membership, onRecovered]);
-  if (state.membership) return null;
+    else if (state.projectionPending) onPending(state.projectionPending);
+  }, [state.membership, state.projectionPending, onRecovered, onPending]);
+  if (state.membership || state.projectionPending) return null;
   return (
     <form action={action} className="mt-8 space-y-4 border-t border-gray-600 pt-6">
       <h2 className="text-xl font-semibold">Recover a guest session</h2>
@@ -136,9 +145,10 @@ function RecoveryForm({
   );
 }
 
-export function GuestEntry({ existingMemberships, hostSession = false }: {
+export function GuestEntry({ existingMemberships, hostSession = false, membershipUnavailable = false }: {
   existingMemberships: NonNullable<GuestFormState["membership"]>[];
   hostSession?: boolean;
+  membershipUnavailable?: boolean;
 }) {
   const [inviteCode, setInviteCode] = useState("");
   const [memberships, setMemberships] = useState(existingMemberships);
@@ -148,6 +158,10 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
   const [recovering, setRecovering] = useState(false);
   const [validated, setValidated] = useState(false);
   const [reconciliation, setReconciliation] = useState(0);
+  const [awaitingLobby, setAwaitingLobby] = useState<PendingLobbyKind | null>(
+    membershipUnavailable ? "existing" : null,
+  );
+  const [syncUnauthorized, setSyncUnauthorized] = useState(false);
   const joined = useCallback((membership: GuestMembership) => {
     invalidatePrivateUI(true);
     setValidated(false);
@@ -155,10 +169,20 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
     previousMembers.current = [membership.participantId];
     setLostMembership(false);
     setRecovering(false);
+    setAwaitingLobby(null);
+    setSyncUnauthorized(false);
     setMemberships([membership]);
   }, []);
+  const pendingProjection = useCallback((kind: "joined" | "recovered") => {
+    invalidatePrivateUI(true);
+    setValidated(false);
+    setLostMembership(false);
+    setInviteCode("");
+    setSyncUnauthorized(false);
+    setAwaitingLobby(kind);
+  }, []);
   const { reconnecting, refresh } = useLobbySync(
-    memberships.length ? "/join/sync" : null,
+    memberships.length || awaitingLobby ? "/join/sync" : null,
     (data) => {
       if (!data || typeof data !== "object" || !("memberships" in data) ||
           !Array.isArray(data.memberships) || !data.memberships.every(validMembership)) {
@@ -171,12 +195,15 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
       if (previousMembers.current.some((id) => !currentIds.includes(id))) setLostMembership(true);
       previousMembers.current = currentIds;
       setMemberships(data.memberships);
+      setSyncUnauthorized(false);
+      if (data.memberships.length || awaitingLobby === "existing") setAwaitingLobby(null);
       setValidated(true);
       setReconciliation((value) => value + 1);
     },
     () => {
       setMemberships([]);
       setLostMembership(true);
+      setSyncUnauthorized(true);
       previousMembers.current = [];
     },
     () => setValidated(false),
@@ -184,7 +211,7 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
   return (
     <>
       <ClearFragment onCode={setInviteCode} />
-      {reconnecting && memberships.length > 0 && <p role="status" className="mt-4 text-sm">Reconnecting to the lobby…</p>}
+      {reconnecting && !syncUnauthorized && (memberships.length > 0 || awaitingLobby) && <p role="status" className="mt-4 text-sm">Reconnecting to the lobby…</p>}
       {lostMembership && <p role="status" className="mt-4">This browser no longer has access to that lobby. Ask the host for help.</p>}
       {memberships.length ? (
         <div className="mt-8 space-y-4">
@@ -192,6 +219,14 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
             <WaitingLobby key={membership.participantId} membership={membership} refresh={refresh} validated={validated} reconciliation={reconciliation} />
           ))}
         </div>
+      ) : awaitingLobby ? (
+        <section className="mt-8 space-y-3 rounded border border-amber-300 p-4" role="status">
+          <p>{pendingLobbyStatus(awaitingLobby, syncUnauthorized).message}</p>
+          {pendingLobbyStatus(awaitingLobby, syncUnauthorized).canRetry && <>
+            <button type="button" className="underline" onClick={refresh}>Retry lobby</button>{" · "}
+          </>}
+          <a href="/join" className="underline">Reload lobby</a>
+        </section>
       ) : hostSession ? (
         <section className="mt-8 space-y-4 rounded border border-amber-300 p-4" role="status">
           <h2 className="text-xl font-semibold">Open this invitation in a private window</h2>
@@ -202,9 +237,9 @@ export function GuestEntry({ existingMemberships, hostSession = false }: {
       ) : (
         <section className="mt-6 space-y-4">
           {recovering ? (
-            <RecoveryForm onRecovered={joined} />
+            <RecoveryForm onRecovered={joined} onPending={pendingProjection} />
           ) : (
-            <JoinForm code={inviteCode} setCode={setInviteCode} onJoined={joined} />
+            <JoinForm code={inviteCode} setCode={setInviteCode} onJoined={joined} onPending={pendingProjection} />
           )}
           <button
             type="button"

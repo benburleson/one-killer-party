@@ -7,7 +7,7 @@ import { validPartyId, verifiedEmailHost, verifier } from "@/lib/host/core";
 import { serviceRoleClient } from "@/lib/supabase/service-client";
 import { publishedVersionRefSchema } from "@/lib/mystery-content/schema";
 import { loadPublishedPublicMystery } from "@/lib/mystery-content/trusted-loader";
-import { coherentGuestRevision, generateRecoveryToken, recoveryTokenVerifier, validRecoveryToken } from "./core";
+import { coherentGuestRevision, committedGuestResult, generateRecoveryToken, recoveryTokenVerifier, validRecoveryToken } from "./core";
 import {
   BLACKWOOD_PUBLIC_CHARACTERS,
   isBlackwoodPackage,
@@ -166,7 +166,7 @@ export function lobbyService() {
       });
       if (!Array.isArray(data) || data.length !== 1) return null;
       const row = data[0] as Row;
-      return row.outcome === "joined" ? projectMembership({
+      return row.outcome === "joined" ? committedGuestResult("joined", () => projectMembership({
         party_id: row.party_id,
         participant_id: row.participant_id,
         display_name: row.display_name,
@@ -175,7 +175,7 @@ export function lobbyService() {
         assigned_character_id: null,
         mystery_id: row.mystery_id,
         mystery_version: row.mystery_version,
-      }, principal) : { outcome: row.outcome === "full" ? "full" : "unavailable" } as const;
+      }, principal)) : { outcome: row.outcome === "full" ? "full" : "unavailable" } as const;
     },
     async myMemberships(principal: string): Promise<GuestMembership[]> {
       if ((await signedInUser())?.id !== principal) throw new Error("Lobby command unavailable");
@@ -305,10 +305,12 @@ export function lobbyService() {
       });
       if (!Array.isArray(data) || data.length !== 1) return null;
       const row = data[0] as Row;
-      if (row.outcome !== "recovered" || !validPartyId(row.party_id) ||
-          !validPartyId(row.participant_id)) return null;
-      return (await guestMemberships(principal)).find((item) =>
-        item.partyId === row.party_id && item.participantId === row.participant_id) ?? null;
+      if (row.outcome !== "recovered") return null;
+      return committedGuestResult("recovered", async () => {
+        if (!validPartyId(row.party_id) || !validPartyId(row.participant_id)) return null;
+        return (await guestMemberships(principal)).find((item) =>
+          item.partyId === row.party_id && item.participantId === row.participant_id) ?? null;
+      });
     },
   };
 }

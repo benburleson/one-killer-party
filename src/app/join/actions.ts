@@ -9,7 +9,11 @@ import { lobbyService, rateBucketHash, signedInUser, type GuestMembership } from
 import { sameOrigin } from "@/lib/request";
 import { captchaTokenFromForm } from "@/lib/turnstile-token";
 
-export type GuestFormState = { message?: string; membership?: GuestMembership };
+export type GuestFormState = {
+  message?: string;
+  membership?: GuestMembership;
+  projectionPending?: "joined" | "recovered";
+};
 
 type PrincipalResult =
   | { kind: "guest"; id: string }
@@ -55,14 +59,16 @@ export async function joinParty(_state: GuestFormState, form: FormData): Promise
     if (principal.kind === "anonymous_sign_in_failed") {
       return { message: "Guest sign-in was unavailable. Please refresh and retry. If this continues, contact the host." };
     }
-    const membership = await lobbyService().join(
+    const result = await lobbyService().join(
       principal.id,
       code,
       displayName,
       rateBucketHash("join", principal.id, forwardedClientAddress(await headers())),
     );
-    if (membership && "partyId" in membership) return { membership };
-    if (membership?.outcome === "full") {
+    if (result?.outcome === "joined") {
+      return result.membership ? { membership: result.membership } : { projectionPending: "joined" };
+    }
+    if (result?.outcome === "full") {
       return { message: "This party is full. Ask the host for help." };
     }
   } catch {
@@ -87,12 +93,14 @@ export async function redeemRecovery(_state: GuestFormState, form: FormData): Pr
     if (principal.kind === "anonymous_sign_in_failed") {
       return { message: "Guest sign-in was unavailable. Please refresh and retry. If this continues, contact the host." };
     }
-    const membership = await lobbyService().redeemRecovery(
+    const result = await lobbyService().redeemRecovery(
       principal.id,
       rawToken,
       rateBucketHash("recovery", principal.id, forwardedClientAddress(await headers())),
     );
-    if (membership) return { membership };
+    if (result?.outcome === "recovered") {
+      return result.membership ? { membership: result.membership } : { projectionPending: "recovered" };
+    }
   } catch {
     // Keep expired, forged, consumed, cross-party and provider failures indistinguishable.
   }
