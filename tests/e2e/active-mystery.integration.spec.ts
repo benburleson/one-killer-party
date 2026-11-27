@@ -6,6 +6,7 @@ import { publishMysteryDefinition, type PublicationBinding } from "../../src/lib
 import { PRIVATE_BUCKET, loadTrustedPublicMystery } from "../../src/lib/mystery-content/trusted-loader-core.ts";
 import { EIGHT_ROLE_PROTOTYPE_RULES } from "../../src/lib/mystery-content/validate.ts";
 import { SYNTHETIC_SENTINELS, syntheticMysteryPackage } from "../unit/fixtures/synthetic-mystery-package.mjs";
+import { configureTurnstile, signIn, verifiedSubmit } from "./local-auth";
 import { isolateLocalRateLimits } from "./local-isolation";
 
 test.beforeEach(isolateLocalRateLimits);
@@ -149,27 +150,6 @@ function activateLocal(ref: {
   ], { stdio: ["ignore", "ignore", "pipe"] });
 }
 
-const turnstileScript = `
-(() => {
-  let nextId = 0;
-  const active = new Map();
-  window.turnstile = {
-    render(element, options) {
-      const id = String(++nextId);
-      active.set(id, options);
-      element.setAttribute("data-test-turnstile", options.action || "");
-      queueMicrotask(() => { if (active.has(id)) options.callback("XXXX.DUMMY.TOKEN.XXXX"); });
-      return id;
-    },
-    reset(id) {
-      const options = active.get(id);
-      if (options) queueMicrotask(() => { if (active.has(id)) options.callback("XXXX.DUMMY.TOKEN.XXXX"); });
-    },
-    remove(id) { active.delete(id); },
-  };
-})();
-`;
-
 async function testContext(browser: Browser, mobile: boolean) {
   const context = await browser.newContext({
     baseURL: "http://127.0.0.1:3000",
@@ -177,46 +157,8 @@ async function testContext(browser: Browser, mobile: boolean) {
     isMobile: mobile,
     hasTouch: mobile,
   });
-  await context.route("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/javascript", body: turnstileScript });
-  });
+  await configureTurnstile(context);
   return context;
-}
-
-async function requestMagicLink(page: Page) {
-  const mailbox = `active-${randomUUID()}@example.test`;
-  await page.goto("/host");
-  await page.getByLabel("Email address").fill(mailbox);
-  const submit = page.getByRole("button", { name: "Send sign-in link" });
-  await expect(submit).toBeEnabled();
-  await submit.click();
-  await expect(page.getByText("If sign-in is available, check your email for a link.")).toBeVisible();
-  let link: string | undefined;
-  for (let attempt = 0; attempt < 30 && !link; attempt++) {
-    const inbox = await fetch(`http://127.0.0.1:54324/api/v1/search?query=${encodeURIComponent(`to:${mailbox}`)}`);
-    if (inbox.ok) {
-      const { messages } = await inbox.json() as { messages?: { ID: string }[] };
-      if (messages?.length) {
-        const message = await fetch(`http://127.0.0.1:54324/api/v1/message/${encodeURIComponent(messages[0].ID)}`);
-        if (message.ok) {
-          const data = await message.json() as { HTML?: string; Text?: string };
-          link = (data.HTML || data.Text || "").match(
-            /http:\/\/127\.0\.0\.1:54321\/auth\/v1\/verify\?[^"'\s<>]+/,
-          )?.[0]?.replaceAll("&amp;", "&");
-        }
-      }
-    }
-    if (!link) await page.waitForTimeout(500);
-  }
-  if (!link) throw new Error("Local email was not received");
-  const url = new URL(link);
-  const redirect = new URL(url.searchParams.get("redirect_to") || "");
-  if (url.origin !== "http://127.0.0.1:54321" || url.pathname !== "/auth/v1/verify" ||
-      redirect.origin !== "http://127.0.0.1:3000" || redirect.pathname !== "/auth/callback") {
-    throw new Error("Unexpected local auth link");
-  }
-  await page.goto(url.href);
-  await expect(page.getByRole("button", { name: "Create a Blackwood Affair party" })).toBeVisible();
 }
 
 function watchPublicResponses(page: Page) {
@@ -269,9 +211,7 @@ async function joinAsGuest(browser: Browser, code: string, name: string, mobile:
   await expect(page.getByLabel("Eight-character invitation code")).toHaveValue(code);
   await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("");
   await page.getByLabel("Your display name").fill(name);
-  const submit = page.getByRole("button", { name: "Join party" });
-  await expect(submit).toBeEnabled();
-  await submit.click();
+  await verifiedSubmit(page, "Join party");
   await expect(page.getByText(`Your display name: ${name}`)).toBeVisible();
   return { context, page, assertNoPrivate };
 }
@@ -316,7 +256,7 @@ test("activated published and legacy lobbies render and synchronize without priv
   const hostPage = await hostContext.newPage();
   const assertHostNoPrivate = watchPublicResponses(hostPage);
   try {
-    await requestMagicLink(hostPage);
+    await signIn(hostPage);
 
     const legacy = await createParty(hostPage);
     await expect(hostPage.getByRole("heading", { name: "Blackwood Affair" })).toBeVisible();
