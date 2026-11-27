@@ -227,6 +227,22 @@ function watchDossierRequests(context: BrowserContext) {
   return requests;
 }
 
+function watchPollLatency(page: Page, path: string) {
+  const started = new WeakMap<object, number>();
+  const latencies: number[] = [];
+  const statuses: number[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === path) started.set(request, Date.now());
+  });
+  page.on("response", (response) => {
+    const start = started.get(response.request());
+    if (start === undefined) return;
+    latencies.push(Date.now() - start);
+    statuses.push(response.status());
+  });
+  return { latencies, statuses };
+}
+
 async function openCharacter(page: Page, index: number) {
   const responsePromise = page.waitForResponse((response) =>
     /^\/api\/lobby\/[^/]+\/dossier$/.test(new URL(response.url()).pathname) &&
@@ -251,6 +267,31 @@ async function openCharacter(page: Page, index: number) {
     SYNTHETIC_SENTINELS.objective, SYNTHETIC_SENTINELS.solution]) {
     expect(content).not.toContain(sentinel);
   }
+}
+
+async function expectNoPersistentDossier(page: Page) {
+  const result = await page.evaluate(async (sentinels) => {
+    const stored = [
+      ...Array.from({ length: localStorage.length }, (_, index) => {
+        const key = localStorage.key(index)!;
+        return `${key}:${localStorage.getItem(key)}`;
+      }),
+      ...Array.from({ length: sessionStorage.length }, (_, index) => {
+        const key = sessionStorage.key(index)!;
+        return `${key}:${sessionStorage.getItem(key)}`;
+      }),
+    ].join("\n");
+    return {
+      containsPrivateSentinel: sentinels.some((sentinel) => stored.includes(sentinel)),
+      indexedDatabaseCount: (await indexedDB.databases()).length,
+      cacheCount: (await caches.keys()).length,
+      serviceWorkerCount: (await navigator.serviceWorker.getRegistrations()).length,
+    };
+  }, Object.values(SYNTHETIC_SENTINELS));
+  expect(result.containsPrivateSentinel).toBe(false);
+  expect(result.indexedDatabaseCount).toBe(0);
+  expect(result.cacheCount).toBe(0);
+  expect(result.serviceWorkerCount).toBe(0);
 }
 
 async function dossier(page: Page, partyPath: string, origin = "http://127.0.0.1:3000") {
@@ -337,6 +378,13 @@ test("My Character is on demand, principal-scoped, and invalidated by lobby chan
     await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toHaveCount(0);
     await openCharacter(guest.page, 0);
     expect(guest.requests).toEqual(["POST", "POST"]);
+    await expectNoPersistentDossier(guest.page);
+    await guest.context.setOffline(true);
+    await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toHaveCount(0);
+    await guest.context.setOffline(false);
+    await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true }))
+      .toBeVisible({ timeout: 15_000 });
+    expect(guest.requests).toEqual(["POST", "POST", "POST"]);
     await openCharacter(other.page, 1);
     await openCharacter(hostPage, 2);
     expect(other.requests).toEqual(["POST"]);
@@ -568,5 +616,69 @@ test("activated published and legacy lobbies render and synchronize without priv
     ], { stdio: ["ignore", "ignore", "ignore"] });
     for (const context of guestContexts) await context.close().catch(() => {});
     for (const context of hostContexts) await context.close().catch(() => {});
+  }
+});
+
+test("eight-player published lobby polls concurrently during host operations", async ({ browser }, testInfo) => {
+  const { ref, publicPackage } = await publishSyntheticPackage();
+  const mobile = testInfo.project.name === "integration-mobile";
+  const contexts: BrowserContext[] = [];
+  const hostContext = await testContext(browser, mobile);
+  contexts.push(hostContext);
+  const hostPage = await hostContext.newPage();
+  const assertHostNoPrivate = watchPublicResponses(hostPage);
+  const metrics: ReturnType<typeof watchPollLatency>[] = [];
+  try {
+    await signIn(hostPage);
+    activateLocal(ref);
+    const party = await createParty(hostPage, "Synthetic Published Lobby");
+    const guests = [];
+    for (let index = 0; index < 7; index++) {
+      const guest = await joinAsGuest(browser, party.code, `Load Guest ${index + 1}`, mobile);
+      contexts.push(guest.context);
+      guests.push(guest);
+    }
+    await expect(hostPage.getByRole("heading", { name: "Players (7/8)" })).toBeVisible({ timeout: 15_000 });
+    await hostPage.getByLabel("Player display name").fill("Load Host");
+    await hostPage.getByRole("button", { name: "Join as a player" }).click();
+    await expect(hostPage.getByText("You are enrolled as a player.")).toBeVisible();
+    await expect(hostPage.getByRole("heading", { name: "Players (8/8)" })).toBeVisible({ timeout: 15_000 });
+
+    metrics.push(watchPollLatency(hostPage, `/host/${party.partyPath.split("/").pop()}/sync`));
+    for (const guest of guests) metrics.push(watchPollLatency(guest.page, "/join/sync"));
+    const participantList = hostPage.getByRole("list").filter({
+      has: hostPage.getByRole("button", { name: "Save assignment" }),
+    });
+    for (let index = 0; index < guests.length; index++) {
+      const row = participantList.getByRole("listitem").filter({
+        has: hostPage.getByText(`Load Guest ${index + 1}`, { exact: true }),
+      });
+      await row.getByLabel("Assigned public character").selectOption(publicPackage.characters[index].id);
+      await row.getByRole("button", { name: "Save assignment" }).click();
+      await expect(row.getByRole("status")).toContainText("Character assignment updated.");
+    }
+    await expect.poll(() => metrics.every(({ latencies }) => latencies.length >= 2), { timeout: 30_000 }).toBe(true);
+    for (const { statuses } of metrics) expect(statuses.every((status) => status === 200)).toBe(true);
+    for (const guest of guests) expect(guest.requests).toEqual([]);
+    for (const guest of guests) await guest.assertNoPrivate(await guest.page.content());
+    await assertHostNoPrivate(await hostPage.content());
+
+    const samples = metrics.flatMap(({ latencies }) => latencies).sort((a, b) => a - b);
+    const percentile = (ratio: number) => samples[Math.min(Math.ceil(samples.length * ratio) - 1, samples.length - 1)];
+    console.log(JSON.stringify({
+      scenario: "disposable-local-eight-player-lobby",
+      clients: metrics.length,
+      successfulPolls: samples.length,
+      pollsPerClientMinimum: Math.min(...metrics.map(({ latencies }) => latencies.length)),
+      latencyMs: { p50: percentile(0.5), p95: percentile(0.95), max: samples.at(-1) },
+      hostAssignmentsDuringPolling: guests.length,
+    }));
+  } finally {
+    execFileSync("docker", [
+      "exec", "supabase_db_one-killer-party", "psql", "-X", "-v", "ON_ERROR_STOP=1",
+      "-U", "postgres", "-d", "postgres", "-c",
+      "UPDATE private_mystery.active_version SET mystery_id=NULL,version=NULL,schema_version=NULL,digest_sha256=NULL WHERE singleton",
+    ], { stdio: ["ignore", "ignore", "ignore"] });
+    for (const context of contexts) await context.close().catch(() => {});
   }
 });
