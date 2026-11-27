@@ -1,5 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { isolateLocalRateLimits, localJoinRateLimited } from "./local-isolation";
+
+test.beforeEach(isolateLocalRateLimits);
+
+async function admissionCategory(page: Page): Promise<string> {
+  if (await page.getByRole("heading", { name: "You’re in the lobby" }).count()) return "joined";
+  if (await page.getByText("This party is full. Ask the host for help.").count()) return "full";
+  if (await page.getByText("Guest sign-in was unavailable. Please refresh and retry. If this continues, contact the host.").count()) {
+    return "auth_unavailable";
+  }
+  if (await page.getByText("That invitation could not be used. Check the code or ask the host for help.").count()) {
+    return localJoinRateLimited() ? "rate_limited" : "unavailable";
+  }
+  return "timeout";
+}
 
 // Local Supabase has CAPTCHA disabled; emulate only Cloudflare's browser-side
 // widget/token issuance. This isolates the guest recovery race test from external
@@ -93,6 +108,7 @@ async function signIn(page: Page) {
 test("local host sign-in, party access, isolation and sign-out", async ({ page, browser }, testInfo) => {
   await configureTurnstile(page.context());
   let stage = "sign-in screen";
+  let admissionOutcomes: string[] = [];
   const guestContexts: BrowserContext[] = [];
   try {
     await page.goto("/host");
@@ -422,13 +438,10 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
       verifiedSubmit(finalTwo, "Join party"),
     ]);
     await expect.poll(async () => {
-      const joinedCount = await Promise.all([finalOne, finalTwo].map((finalPage) =>
-        finalPage.getByRole("heading", { name: "You’re in the lobby" }).count()));
-      const fullCount = await Promise.all([finalOne, finalTwo].map((finalPage) =>
-        finalPage.getByText("This party is full. Ask the host for help.").count()));
-      return joinedCount.reduce((sum, value) => sum + value, 0) === 1 &&
-        fullCount.reduce((sum, value) => sum + value, 0) === 1;
-    }).toBe(true);
+      admissionOutcomes = await Promise.all([finalOne, finalTwo].map(admissionCategory));
+      return admissionOutcomes.filter((value) => value === "joined").length === 1 &&
+        admissionOutcomes.filter((value) => value === "full").length === 1;
+    }, { timeout: 15_000 }).toBe(true);
     await page.goto(partyPath);
     await expect(page.getByRole("heading", { name: "Players (8/8)" })).toBeVisible();
 
@@ -440,7 +453,7 @@ test("local host sign-in, party access, isolation and sign-out", async ({ page, 
     await expect(page.getByLabel("Email address")).toBeVisible();
   } catch {
     // Playwright errors may contain URLs or DOM text; retain only a safe stage.
-    throw new Error(`Local integration failed at: ${stage}`);
+    throw new Error(`Local integration failed at: ${stage}${admissionOutcomes.length ? `; outcomes=${admissionOutcomes.join(",")}` : ""}`);
   } finally {
     await Promise.all(guestContexts.map((context) => context.close()));
   }

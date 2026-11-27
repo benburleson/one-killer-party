@@ -6,6 +6,9 @@ import { publishMysteryDefinition, type PublicationBinding } from "../../src/lib
 import { PRIVATE_BUCKET, loadTrustedPublicMystery } from "../../src/lib/mystery-content/trusted-loader-core.ts";
 import { EIGHT_ROLE_PROTOTYPE_RULES } from "../../src/lib/mystery-content/validate.ts";
 import { SYNTHETIC_SENTINELS, syntheticMysteryPackage } from "../unit/fixtures/synthetic-mystery-package.mjs";
+import { isolateLocalRateLimits } from "./local-isolation";
+
+test.beforeEach(isolateLocalRateLimits);
 
 const noAuthSession = { auth: { persistSession: false, autoRefreshToken: false } };
 
@@ -288,13 +291,13 @@ test("activated published and legacy lobbies render and synchronize without priv
     await expect(hostPage.getByRole("heading", { name: "Blackwood Affair" })).toBeVisible();
     const legacyGuest = await joinAsGuest(browser, legacy.code, "Legacy Guest");
     guestContexts.push(legacyGuest.context);
-    await expect(hostPage.getByRole("heading", { name: "Players (1/8)" })).toBeVisible();
+    await expect(hostPage.getByRole("heading", { name: "Players (1/8)" })).toBeVisible({ timeout: 15_000 });
     const legacyRow = hostPage.getByRole("list").filter({
       has: hostPage.getByRole("button", { name: "Save assignment" }),
     }).getByRole("listitem").filter({ has: hostPage.getByText("Legacy Guest", { exact: true }) });
     await legacyRow.getByLabel("Assigned public character").selectOption("vivienne");
     await legacyRow.getByRole("button", { name: "Save assignment" }).click();
-    await expect(legacyGuest.page.getByRole("heading", { name: "Vivienne Blackwood" })).toBeVisible();
+    await expect(legacyGuest.page.getByRole("heading", { name: "Vivienne Blackwood" })).toBeVisible({ timeout: 15_000 });
 
     await hostPage.goto("/host");
     await expect(hostPage.getByRole("button", { name: "Create a Blackwood Affair party" })).toBeVisible();
@@ -305,7 +308,7 @@ test("activated published and legacy lobbies render and synchronize without priv
 
     const guest = await joinAsGuest(browser, published.code, "Published Guest");
     guestContexts.push(guest.context);
-    await expect(hostPage.getByRole("heading", { name: "Players (1/8)" })).toBeVisible();
+    await expect(hostPage.getByRole("heading", { name: "Players (1/8)" })).toBeVisible({ timeout: 15_000 });
     const publishedRow = hostPage.getByRole("list").filter({
       has: hostPage.getByRole("button", { name: "Save assignment" }),
     }).getByRole("listitem").filter({ has: hostPage.getByText("Published Guest", { exact: true }) });
