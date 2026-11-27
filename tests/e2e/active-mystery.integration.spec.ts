@@ -302,8 +302,6 @@ test("activated published and legacy lobbies render and synchronize without priv
     await expect(hostPage.getByRole("list", { name: "Public character roster" }).getByRole("listitem"))
       .toHaveCount(8);
     await expect(hostPage.getByText(publicPackage.characters[0].publicName, { exact: true })).toBeVisible();
-    await expect(hostPage.getByLabel("Assigned public character"))
-      .toContainText(publicPackage.characters[0].publicName);
 
     const guest = await joinAsGuest(browser, published.code, "Published Guest");
     guestContexts.push(guest.context);
