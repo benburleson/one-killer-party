@@ -500,7 +500,7 @@ test("diagnostics never contain authored text, unsafe keys or unbounded output",
   assert.equal(validated((p) => { p.title = ""; }).truncated, false);
 });
 
-test("the content module is pure, has no barrel and is not wired into the application", () => {
+test("the content module is pure and only wired into trusted server code", () => {
   const moduleUrl = new URL("../../src/lib/mystery-content/", import.meta.url);
   const files = ["canonical-json.ts", "ids.ts", "integrity.ts", "issues.ts", "schema.ts", "validate.ts"];
   const imports = files.flatMap((name) =>
@@ -516,7 +516,10 @@ test("the content module is pure, has no barrel and is not wired into the applic
     .map((name) => name.replaceAll("\\", "/"))
     .filter((name) => /\.tsx?$/.test(name) && !name.startsWith("lib/mystery-content/"))
     .filter((name) => /mystery-content/.test(readFileSync(new URL(name, srcUrl), "utf8")));
-  assert.deepEqual(importers, []);
+  assert.deepEqual(importers.sort(), ["lib/host/core.ts", "lib/host/service.ts", "lib/lobby/service.ts"]);
+  for (const name of importers) {
+    assert.doesNotMatch(readFileSync(new URL(name, srcUrl), "utf8"), /^"use client";$/m);
+  }
 
   const trustedLoader = readFileSync(new URL("trusted-loader.ts", moduleUrl), "utf8");
   assert.match(trustedLoader, /^import "server-only";$/m);

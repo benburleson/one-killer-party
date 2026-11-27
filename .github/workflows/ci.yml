@@ -37,6 +37,8 @@ jobs:
         run: npx supabase test db
       - name: Test private mystery publication against local Supabase
         run: npm run test:integration:mystery
+      - name: Test active mystery lobbies against local Supabase
+        run: npm run test:integration:active
       - name: Stop local Supabase and remove volumes
         if: always()
         run: npx supabase stop --project-id one-killer-party --no-backup >/dev/null 2>&1 || true

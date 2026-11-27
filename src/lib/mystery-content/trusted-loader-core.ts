@@ -22,6 +22,16 @@ export type TrustedPackageLoadResult =
   | Readonly<{ ok: true; definition: MysteryDefinition }>
   | Readonly<{ ok: false; code: "CONTENT_UNAVAILABLE" }>;
 
+export type PublicMysteryProjection = Readonly<{
+  title: string;
+  characters: readonly Readonly<{
+    id: string;
+    publicName: string;
+    archetype: string;
+    description: string;
+  }>[];
+}>;
+
 function isRegistryRecord(value: unknown): value is RegistryRecord {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
@@ -69,6 +79,25 @@ export async function loadTrustedPublishedMystery(
   } catch {
     return { ok: false, code: "CONTENT_UNAVAILABLE" };
   }
+}
+
+/** Only explicitly public fields may cross from a verified package to a lobby. */
+export async function loadTrustedPublicMystery(
+  expected: unknown,
+  store: TrustedPackageStore,
+): Promise<Readonly<{ ok: true; projection: PublicMysteryProjection }> |
+  Readonly<{ ok: false; code: "CONTENT_UNAVAILABLE" }>> {
+  const loaded = await loadTrustedPublishedMystery(expected, store);
+  if (!loaded.ok) return loaded;
+  return {
+    ok: true,
+    projection: {
+      title: loaded.definition.title,
+      characters: loaded.definition.characters.map(({ id, publicName, archetype, description }) => ({
+        id, publicName, archetype, description,
+      })),
+    },
+  };
 }
 
 export { PRIVATE_BUCKET };

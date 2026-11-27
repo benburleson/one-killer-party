@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { sha256Hex } from "../../src/lib/mystery-content/integrity.ts";
-import { loadTrustedPublishedMystery } from "../../src/lib/mystery-content/trusted-loader-core.ts";
+import { loadTrustedPublicMystery, loadTrustedPublishedMystery } from "../../src/lib/mystery-content/trusted-loader-core.ts";
 import { publishMysteryDefinition } from "../../src/lib/mystery-content/publication.ts";
 import { EIGHT_ROLE_PROTOTYPE_RULES } from "../../src/lib/mystery-content/validate.ts";
-import { syntheticMysteryPackage } from "./fixtures/synthetic-mystery-package.mjs";
+import { SYNTHETIC_SENTINELS, syntheticMysteryPackage } from "./fixtures/synthetic-mystery-package.mjs";
 
 const metadata = {
   provenance: "synthetic:unit-test",
@@ -109,6 +109,46 @@ test("keeps a second immutable version independently loadable and rejects change
   const conflict = await publishMysteryDefinition(conflicting, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
   assert.deepEqual(conflict, { ok: false, code: "REGISTRATION_FAILED" });
   assert.equal((await loadTrustedPublishedMystery(first.ref, store)).ok, true);
+});
+
+test("public projections use the exact verified pin and contain only allowlisted metadata", async () => {
+  const store = memoryStore();
+  const firstPackage = syntheticMysteryPackage();
+  firstPackage.mysteryId = "synthetic-public";
+  firstPackage.version = "v1";
+  const secondPackage = syntheticMysteryPackage();
+  secondPackage.mysteryId = "synthetic-public";
+  secondPackage.version = "v2";
+  secondPackage.title = "Another public title";
+  secondPackage.characters[0].publicName = "Another public name";
+  const first = await publishMysteryDefinition(firstPackage, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
+  const second = await publishMysteryDefinition(secondPackage, EIGHT_ROLE_PROTOTYPE_RULES, localAuthorization(), store);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+
+  const one = await loadTrustedPublicMystery(first.ref, store);
+  const two = await loadTrustedPublicMystery(second.ref, store);
+  assert.equal(one.ok, true);
+  assert.equal(two.ok, true);
+  assert.equal(one.projection.title, firstPackage.title);
+  assert.equal(two.projection.title, "Another public title");
+  assert.equal(one.projection.characters[0].publicName, firstPackage.characters[0].publicName);
+  assert.equal(two.projection.characters[0].publicName, "Another public name");
+  assert.deepEqual(Object.keys(one.projection).sort(), ["characters", "title"]);
+  for (const character of one.projection.characters) {
+    assert.deepEqual(Object.keys(character).sort(), ["archetype", "description", "id", "publicName"]);
+  }
+  for (const sentinel of Object.values(SYNTHETIC_SENTINELS)) {
+    assert.equal(JSON.stringify(one).includes(sentinel), false);
+  }
+
+  const unavailable = { ok: false, code: "CONTENT_UNAVAILABLE" };
+  assert.deepEqual(await loadTrustedPublicMystery({ ...first.ref, digestSha256: second.ref.digestSha256 }, store), unavailable);
+  assert.deepEqual(await loadTrustedPublicMystery({ ...first.ref, schemaVersion: 2 }, store), unavailable);
+  const path = `${first.ref.mysteryId}/${first.ref.version}/${first.ref.digestSha256}.json`;
+  store.objects.set(path, new Uint8Array([0x7b, 0x7d]));
+  assert.deepEqual(await loadTrustedPublicMystery(first.ref, store), unavailable);
+  assert.equal((await loadTrustedPublicMystery(second.ref, store)).ok, true);
 });
 
 test("fails closed for missing, corrupt, mismatched, unpublished, and legacy references", async () => {

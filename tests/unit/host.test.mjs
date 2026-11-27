@@ -109,18 +109,26 @@ test("foreign and malformed party reads fail closed", async () => {
 test("create retries collisions, sends only verifier, and does not reveal a replacement on idempotent retry", async () => {
   const codes = ["ABCDEFGH", "JKLMNPQR", "STUVWXYZ"];
   const calls = [];
+  let created = false;
+  let attempts = 0;
   const service = hostService({
     user: async () => host,
     code: () => codes.shift(),
     rpc: async (name, args) => {
       calls.push({ name, args });
-      if (calls.length === 1) return { data: null, error: { code: "23505" } };
-      return { data: [{ party_id: id, created: calls.length === 2 }], error: null };
+      if (name === "get_host_party") return { data: created ? [{ party_id: id, status: "LOBBY", version: 0, mystery_id: "blackwood-affair" }] : [], error: null };
+      if (name === "get_active_mystery") return { data: [{ mystery_id: null, version: null, schema_version: null, digest_sha256: null }], error: null };
+      if (++attempts === 1) return { data: null, error: { code: "23505" } };
+      created = true;
+      return { data: [{ party_id: id, created: true }], error: null };
     },
   });
   assert.deepEqual(await service.create(id), { kind: "issued", partyId: id, code: "JKLMNPQR" });
   assert.deepEqual(await service.create(id), { kind: "existing", partyId: id });
-  assert.deepEqual(calls[0], { name: "create_host_party", args: { p_host: host, p_party_id: id, p_verifier_hash: verifier("ABCDEFGH") } });
+  assert.deepEqual(calls[2], { name: "create_pinned_host_party", args: {
+    p_host: host, p_party_id: id, p_verifier_hash: verifier("ABCDEFGH"),
+    p_mystery_id: null, p_version: null, p_schema_version: null, p_digest_sha256: null, p_character_ids: null,
+  } });
   assert.equal(JSON.stringify(calls).includes("ABCDEFGH"), false);
   assert.equal(JSON.stringify(calls).includes("STUVWXYZ"), false);
 });
@@ -146,13 +154,79 @@ test("rotation retries collisions and only issues for an authorized atomic succe
 
 test("collision retries are bounded and other errors never expose provider details", async () => {
   let calls = 0;
-  const service = hostService({ user: async () => host, code: () => "ABCDEFGH", rpc: async () => {
+  const service = hostService({ user: async () => host, code: () => "ABCDEFGH", rpc: async (name) => {
+    if (name === "get_host_party") return { data: [], error: null };
+    if (name === "get_active_mystery") return { data: [{ mystery_id: null, version: null, schema_version: null, digest_sha256: null }], error: null };
     calls++;
     return { data: null, error: { code: "23505", message: "private" } };
   } });
   assert.deepEqual(await service.create(id), { kind: "unavailable" });
   assert.equal(calls, 5);
   assert.deepEqual(await service.rotate("invalid", 0), { kind: "unavailable" });
+});
+
+test("creation uses verified active reference and fails closed before mutation on invalid content", async () => {
+  const active = { mystery_id: "synthetic", version: "v1", schema_version: 1, digest_sha256: "a".repeat(64) };
+  let calls = [];
+  const service = hostService({
+    user: async () => host,
+    code: () => "ABCDEFGH",
+    loadPublic: async (ref) => {
+      assert.equal(ref.digestSha256, active.digest_sha256);
+      return { ok: true, projection: { characters: Array.from({ length: 8 }, (_, i) => ({ id: `role-${i + 1}` })) } };
+    },
+    rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "get_host_party") return { data: [], error: null };
+      if (name === "get_active_mystery") return { data: [active], error: null };
+      return { data: [{ party_id: id, created: true }], error: null };
+    },
+  });
+  assert.equal((await service.create(id)).kind, "issued");
+  assert.deepEqual(calls[2].args.p_character_ids, Array.from({ length: 8 }, (_, i) => `role-${i + 1}`));
+  assert.equal(calls[2].args.p_digest_sha256, active.digest_sha256);
+  calls = [];
+  const failed = hostService({
+    user: async () => host, loadPublic: async () => ({ ok: false }),
+    rpc: async (name) => {
+      calls.push(name);
+      return { data: name === "get_host_party" ? [] : [active], error: null };
+    },
+  });
+  assert.equal((await failed.create(id)).kind, "unavailable");
+  assert.deepEqual(calls, ["get_host_party", "get_active_mystery"]);
+});
+
+test("existing creation retry needs neither activation nor content, and malformed active state fails closed", async () => {
+  const calls = [];
+  const existing = hostService({
+    user: async () => host,
+    loadPublic: async () => { throw new Error("must not load"); },
+    rpc: async (name) => {
+      calls.push(name);
+      return { data: [{ party_id: id, status: "LOBBY", version: 1, mystery_id: "synthetic" }], error: null };
+    },
+  });
+  assert.deepEqual(await existing.create(id), { kind: "existing", partyId: id });
+  assert.deepEqual(calls, ["get_host_party"]);
+
+  for (const activeResponse of [
+    { data: null, error: { code: "unavailable" } },
+    { data: [], error: null },
+    { data: [{ mystery_id: null, version: null, schema_version: 1, digest_sha256: null }], error: null },
+    { data: [{ mystery_id: "synthetic", version: "v1", schema_version: 1, digest_sha256: "wrong" }], error: null },
+  ]) {
+    const calls = [];
+    const failing = hostService({
+      user: async () => host,
+      rpc: async (name) => {
+        calls.push(name);
+        return name === "get_host_party" ? { data: [], error: null } : activeResponse;
+      },
+    });
+    assert.equal((await failing.create(id)).kind, "unavailable");
+    assert.deepEqual(calls, ["get_host_party", "get_active_mystery"]);
+  }
 });
 
 test("concurrent rotation results reveal only the version-checked winner", async () => {
