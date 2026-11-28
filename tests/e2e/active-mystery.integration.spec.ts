@@ -243,6 +243,66 @@ function watchPollLatency(page: Page, path: string) {
   return { latencies, statuses };
 }
 
+// Sanitized lifecycle diagnostics: categories, statuses, network error codes
+// and UI states only; never response bodies, URLs, identifiers or credentials.
+function watchDossierLifecycle(page: Page) {
+  const started = Date.now();
+  const events: string[] = [];
+  const category = (url: string) => {
+    const path = new URL(url).pathname;
+    if (path === "/join/sync" || /^\/host\/[^/]+\/sync$/.test(path)) return "sync";
+    if (/^\/api\/lobby\/[^/]+\/dossier$/.test(path)) return "dossier";
+    return null;
+  };
+  const record = (event: string) => events.push(`+${Date.now() - started}ms ${event}`);
+  page.on("response", (response) => {
+    const kind = category(response.url());
+    if (!kind) return;
+    const status = response.status();
+    record(`${kind} ${status === 401 || status === 403 ? "denied" : status === 200 ? "ok" : "failed"} ${status}`);
+  });
+  page.on("requestfailed", (request) => {
+    const kind = category(request.url());
+    if (!kind) return;
+    const code = /^net::[A-Z_]+$/.exec(request.failure()?.errorText ?? "")?.[0] ?? "unknown";
+    record(`${kind} ${code === "net::ERR_ABORTED" ? "canceled" : "network-failed"} ${code}`);
+  });
+  return {
+    mark: record,
+    async report() {
+      const ui = await page.evaluate(() => {
+        const text = document.body.innerText;
+        const labels = ["Reconnecting to the lobby…", "Waiting to reconnect…", "Loading your character…",
+          "Your character is unavailable."].filter((label) => text.includes(label));
+        const section = document.querySelector('section[aria-label="My Character"]');
+        const buttons = [...(section?.querySelectorAll("button") ?? [])].map((button) =>
+          `${button.textContent === "My Character" ? "open-button" : button.textContent === "Close" ? "close-button" : "other-button"}${button.disabled ? ":disabled" : ""}`);
+        const articles = [...(section?.querySelectorAll("article") ?? [])].map((article) => article.hidden ? "article:hidden" : "article:shown");
+        return [...labels, ...buttons, ...articles];
+      }).catch(() => ["page unavailable"]);
+      return [...events, `ui: ${ui.join(", ") || "no lifecycle status"}`].join("\n");
+    },
+  };
+}
+
+async function withDiagnostics<T>(diagnostics: { report(): Promise<string> }, action: () => Promise<T>) {
+  try {
+    return await action();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message}\nDossier lifecycle diagnostics:\n${await diagnostics.report()}`);
+  }
+}
+
+async function settledGuestSnapshot(page: Page) {
+  const sync = (request: { url(): string; method(): string }) =>
+    request.method() === "GET" && new URL(request.url()).pathname === "/join/sync";
+  const response = await (await page.waitForRequest(sync)).response();
+  expect(response?.status()).toBe(200);
+  // The next poll is scheduled only after the previous snapshot has been applied.
+  await page.waitForRequest(sync);
+}
+
 async function openCharacter(page: Page, index: number) {
   const responsePromise = page.waitForResponse((response) =>
     /^\/api\/lobby\/[^/]+\/dossier$/.test(new URL(response.url()).pathname) &&
@@ -372,6 +432,9 @@ test("My Character is on demand, principal-scoped, and invalidated by lobby chan
     expect(guest.requests).toEqual([]);
     expect(other.requests).toEqual([]);
     expect(hostRequests).toEqual([]);
+    // Every host change bumps the party version in each guest's membership context, and a context change
+    // deliberately closes an open dossier. Let the guest apply a snapshot taken after the final host change.
+    await settledGuestSnapshot(guest.page);
     await openCharacter(guest.page, 0);
     expect(guest.requests).toEqual(["POST"]);
     await guest.page.getByRole("button", { name: "Close", exact: true }).click();
@@ -379,13 +442,37 @@ test("My Character is on demand, principal-scoped, and invalidated by lobby chan
     await openCharacter(guest.page, 0);
     expect(guest.requests).toEqual(["POST", "POST"]);
     await expectNoPersistentDossier(guest.page);
+    const lifecycle = watchDossierLifecycle(guest.page);
+    await guest.page.evaluate(() => {
+      const counts = { online: 0, offline: 0, reset: 0, suspend: 0 };
+      (window as unknown as { __lifecycleEvents: typeof counts }).__lifecycleEvents = counts;
+      window.addEventListener("online", () => counts.online++);
+      window.addEventListener("offline", () => counts.offline++);
+      window.addEventListener("lobby-private-invalidate", (event) => {
+        if ((event as CustomEvent).detail?.reset) counts.reset++; else counts.suspend++;
+      });
+    });
+    const lifecycleEvents = () => guest.page.evaluate(() =>
+      (window as unknown as { __lifecycleEvents: Record<string, number> }).__lifecycleEvents);
+    lifecycle.mark("set offline");
     await guest.context.setOffline(true);
     await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toHaveCount(0);
+    const freshSync = guest.page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/join/sync" && response.status() === 200);
+    const freshDossier = guest.page.waitForResponse((response) =>
+      /^\/api\/lobby\/[^/]+\/dossier$/.test(new URL(response.url()).pathname) && response.status() === 200);
+    lifecycle.mark("set online");
+    // Chromium dispatches the native online event for network emulation; no synthetic event is needed.
     await guest.context.setOffline(false);
-    await expect.poll(() => guest.page.evaluate(() => navigator.onLine)).toBe(true);
-    await guest.page.evaluate(() => window.dispatchEvent(new Event("online")));
-    await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true }))
-      .toBeVisible({ timeout: 15_000 });
+    await withDiagnostics(lifecycle, async () => {
+      await freshSync;
+      await freshDossier;
+      await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toBeVisible();
+    });
+    const events = await lifecycleEvents();
+    expect(events.online).toBe(1);
+    expect(events.offline).toBe(1);
+    expect(events.reset).toBe(0);
     expect(guest.requests).toEqual(["POST", "POST", "POST"]);
     await openCharacter(other.page, 1);
     await openCharacter(hostPage, 2);
