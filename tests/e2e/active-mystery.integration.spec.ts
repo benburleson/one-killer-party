@@ -227,6 +227,82 @@ function watchDossierRequests(context: BrowserContext) {
   return requests;
 }
 
+function watchPollLatency(page: Page, path: string) {
+  const started = new WeakMap<object, number>();
+  const latencies: number[] = [];
+  const statuses: number[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === path) started.set(request, Date.now());
+  });
+  page.on("response", (response) => {
+    const start = started.get(response.request());
+    if (start === undefined) return;
+    latencies.push(Date.now() - start);
+    statuses.push(response.status());
+  });
+  return { latencies, statuses };
+}
+
+// Sanitized lifecycle diagnostics: categories, statuses, network error codes
+// and UI states only; never response bodies, URLs, identifiers or credentials.
+function watchDossierLifecycle(page: Page) {
+  const started = Date.now();
+  const events: string[] = [];
+  const category = (url: string) => {
+    const path = new URL(url).pathname;
+    if (path === "/join/sync" || /^\/host\/[^/]+\/sync$/.test(path)) return "sync";
+    if (/^\/api\/lobby\/[^/]+\/dossier$/.test(path)) return "dossier";
+    return null;
+  };
+  const record = (event: string) => events.push(`+${Date.now() - started}ms ${event}`);
+  page.on("response", (response) => {
+    const kind = category(response.url());
+    if (!kind) return;
+    const status = response.status();
+    record(`${kind} ${status === 401 || status === 403 ? "denied" : status === 200 ? "ok" : "failed"} ${status}`);
+  });
+  page.on("requestfailed", (request) => {
+    const kind = category(request.url());
+    if (!kind) return;
+    const code = /^net::[A-Z_]+$/.exec(request.failure()?.errorText ?? "")?.[0] ?? "unknown";
+    record(`${kind} ${code === "net::ERR_ABORTED" ? "canceled" : "network-failed"} ${code}`);
+  });
+  return {
+    mark: record,
+    async report() {
+      const ui = await page.evaluate(() => {
+        const text = document.body.innerText;
+        const labels = ["Reconnecting to the lobby…", "Waiting to reconnect…", "Loading your character…",
+          "Your character is unavailable."].filter((label) => text.includes(label));
+        const section = document.querySelector('section[aria-label="My Character"]');
+        const buttons = [...(section?.querySelectorAll("button") ?? [])].map((button) =>
+          `${button.textContent === "My Character" ? "open-button" : button.textContent === "Close" ? "close-button" : "other-button"}${button.disabled ? ":disabled" : ""}`);
+        const articles = [...(section?.querySelectorAll("article") ?? [])].map((article) => article.hidden ? "article:hidden" : "article:shown");
+        return [...labels, ...buttons, ...articles];
+      }).catch(() => ["page unavailable"]);
+      return [...events, `ui: ${ui.join(", ") || "no lifecycle status"}`].join("\n");
+    },
+  };
+}
+
+async function withDiagnostics<T>(diagnostics: { report(): Promise<string> }, action: () => Promise<T>) {
+  try {
+    return await action();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message}\nDossier lifecycle diagnostics:\n${await diagnostics.report()}`);
+  }
+}
+
+async function settledGuestSnapshot(page: Page) {
+  const sync = (request: { url(): string; method(): string }) =>
+    request.method() === "GET" && new URL(request.url()).pathname === "/join/sync";
+  const response = await (await page.waitForRequest(sync)).response();
+  expect(response?.status()).toBe(200);
+  // The next poll is scheduled only after the previous snapshot has been applied.
+  await page.waitForRequest(sync);
+}
+
 async function openCharacter(page: Page, index: number) {
   const responsePromise = page.waitForResponse((response) =>
     /^\/api\/lobby\/[^/]+\/dossier$/.test(new URL(response.url()).pathname) &&
@@ -251,6 +327,31 @@ async function openCharacter(page: Page, index: number) {
     SYNTHETIC_SENTINELS.objective, SYNTHETIC_SENTINELS.solution]) {
     expect(content).not.toContain(sentinel);
   }
+}
+
+async function expectNoPersistentDossier(page: Page) {
+  const result = await page.evaluate(async (sentinels) => {
+    const stored = [
+      ...Array.from({ length: localStorage.length }, (_, index) => {
+        const key = localStorage.key(index)!;
+        return `${key}:${localStorage.getItem(key)}`;
+      }),
+      ...Array.from({ length: sessionStorage.length }, (_, index) => {
+        const key = sessionStorage.key(index)!;
+        return `${key}:${sessionStorage.getItem(key)}`;
+      }),
+    ].join("\n");
+    return {
+      containsPrivateSentinel: sentinels.some((sentinel) => stored.includes(sentinel)),
+      indexedDatabaseCount: (await indexedDB.databases()).length,
+      cacheCount: (await caches.keys()).length,
+      serviceWorkerCount: (await navigator.serviceWorker.getRegistrations()).length,
+    };
+  }, Object.values(SYNTHETIC_SENTINELS));
+  expect(result.containsPrivateSentinel).toBe(false);
+  expect(result.indexedDatabaseCount).toBe(0);
+  expect(result.cacheCount).toBe(0);
+  expect(result.serviceWorkerCount).toBe(0);
 }
 
 async function dossier(page: Page, partyPath: string, origin = "http://127.0.0.1:3000") {
@@ -331,12 +432,48 @@ test("My Character is on demand, principal-scoped, and invalidated by lobby chan
     expect(guest.requests).toEqual([]);
     expect(other.requests).toEqual([]);
     expect(hostRequests).toEqual([]);
+    // Every host change bumps the party version in each guest's membership context, and a context change
+    // deliberately closes an open dossier. Let the guest apply a snapshot taken after the final host change.
+    await settledGuestSnapshot(guest.page);
     await openCharacter(guest.page, 0);
     expect(guest.requests).toEqual(["POST"]);
     await guest.page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toHaveCount(0);
     await openCharacter(guest.page, 0);
     expect(guest.requests).toEqual(["POST", "POST"]);
+    await expectNoPersistentDossier(guest.page);
+    const lifecycle = watchDossierLifecycle(guest.page);
+    await guest.page.evaluate(() => {
+      const counts = { online: 0, offline: 0, reset: 0, suspend: 0 };
+      (window as unknown as { __lifecycleEvents: typeof counts }).__lifecycleEvents = counts;
+      window.addEventListener("online", () => counts.online++);
+      window.addEventListener("offline", () => counts.offline++);
+      window.addEventListener("lobby-private-invalidate", (event) => {
+        if ((event as CustomEvent).detail?.reset) counts.reset++; else counts.suspend++;
+      });
+    });
+    const lifecycleEvents = () => guest.page.evaluate(() =>
+      (window as unknown as { __lifecycleEvents: Record<string, number> }).__lifecycleEvents);
+    lifecycle.mark("set offline");
+    await guest.context.setOffline(true);
+    await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toHaveCount(0);
+    const freshSync = guest.page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/join/sync" && response.status() === 200);
+    const freshDossier = guest.page.waitForResponse((response) =>
+      /^\/api\/lobby\/[^/]+\/dossier$/.test(new URL(response.url()).pathname) && response.status() === 200);
+    lifecycle.mark("set online");
+    // Chromium dispatches the native online event for network emulation; no synthetic event is needed.
+    await guest.context.setOffline(false);
+    await withDiagnostics(lifecycle, async () => {
+      await freshSync;
+      await freshDossier;
+      await expect(guest.page.getByText("SENTINEL-DOSSIER-1 placeholder biography.", { exact: true })).toBeVisible();
+    });
+    const events = await lifecycleEvents();
+    expect(events.online).toBe(1);
+    expect(events.offline).toBe(1);
+    expect(events.reset).toBe(0);
+    expect(guest.requests).toEqual(["POST", "POST", "POST"]);
     await openCharacter(other.page, 1);
     await openCharacter(hostPage, 2);
     expect(other.requests).toEqual(["POST"]);
@@ -568,5 +705,74 @@ test("activated published and legacy lobbies render and synchronize without priv
     ], { stdio: ["ignore", "ignore", "ignore"] });
     for (const context of guestContexts) await context.close().catch(() => {});
     for (const context of hostContexts) await context.close().catch(() => {});
+  }
+});
+
+test("eight-player published lobby polls concurrently during host operations", async ({ browser }, testInfo) => {
+  const { ref, publicPackage } = await publishSyntheticPackage();
+  const mobile = testInfo.project.name === "integration-mobile";
+  const contexts: BrowserContext[] = [];
+  const hostContext = await testContext(browser, mobile);
+  contexts.push(hostContext);
+  const hostPage = await hostContext.newPage();
+  const assertHostNoPrivate = watchPublicResponses(hostPage);
+  const metrics: ReturnType<typeof watchPollLatency>[] = [];
+  try {
+    await signIn(hostPage);
+    activateLocal(ref);
+    const party = await createParty(hostPage, "Synthetic Published Lobby");
+    const guests = [];
+    for (let index = 0; index < 7; index++) {
+      const guest = await joinAsGuest(browser, party.code, `Load Guest ${index + 1}`, mobile);
+      contexts.push(guest.context);
+      guests.push(guest);
+    }
+    await expect(hostPage.getByRole("heading", { name: "Players (7/8)" })).toBeVisible({ timeout: 15_000 });
+    await hostPage.getByLabel("Player display name").fill("Load Host");
+    await hostPage.getByRole("button", { name: "Join as a player" }).click();
+    await expect(hostPage.getByText("You are enrolled as a player.")).toBeVisible();
+    await expect(hostPage.getByRole("heading", { name: "Players (8/8)" })).toBeVisible({ timeout: 15_000 });
+
+    metrics.push(watchPollLatency(hostPage, `/host/${party.partyPath.split("/").pop()}/sync`));
+    for (const guest of guests) metrics.push(watchPollLatency(guest.page, "/join/sync"));
+    const participantList = hostPage.getByRole("list").filter({
+      has: hostPage.getByRole("button", { name: "Save assignment" }),
+    });
+    for (let index = 0; index < guests.length; index++) {
+      const row = participantList.getByRole("listitem").filter({
+        has: hostPage.getByText(`Load Guest ${index + 1}`, { exact: true }),
+      });
+      await row.getByLabel("Assigned public character").selectOption(publicPackage.characters[index].id);
+      await row.getByRole("button", { name: "Save assignment" }).click();
+      await expect(row.getByRole("status")).toContainText("Character assignment updated.");
+    }
+    await expect.poll(() => metrics.every(({ latencies }) => latencies.length >= 2), { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => metrics.every(({ statuses }) => statuses.includes(200)), { timeout: 30_000 }).toBe(true);
+    for (const { statuses } of metrics) {
+      expect(statuses.every((status) => status === 200 || status === 503)).toBe(true);
+    }
+    for (const guest of guests) expect(guest.requests).toEqual([]);
+    for (const guest of guests) await guest.assertNoPrivate(await guest.page.content());
+    await assertHostNoPrivate(await hostPage.content());
+
+    const samples = metrics.flatMap(({ latencies }) => latencies).sort((a, b) => a - b);
+    const percentile = (ratio: number) => samples[Math.min(Math.ceil(samples.length * ratio) - 1, samples.length - 1)];
+    console.log(JSON.stringify({
+      scenario: "disposable-local-eight-player-lobby",
+      clients: metrics.length,
+      pollResponses: samples.length,
+      http200Responses: metrics.flatMap(({ statuses }) => statuses).filter((status) => status === 200).length,
+      retryable503Responses: metrics.flatMap(({ statuses }) => statuses).filter((status) => status === 503).length,
+      pollsPerClientMinimum: Math.min(...metrics.map(({ latencies }) => latencies.length)),
+      latencyMs: { p50: percentile(0.5), p95: percentile(0.95), max: samples.at(-1) },
+      hostAssignmentsDuringPolling: guests.length,
+    }));
+  } finally {
+    execFileSync("docker", [
+      "exec", "supabase_db_one-killer-party", "psql", "-X", "-v", "ON_ERROR_STOP=1",
+      "-U", "postgres", "-d", "postgres", "-c",
+      "UPDATE private_mystery.active_version SET mystery_id=NULL,version=NULL,schema_version=NULL,digest_sha256=NULL WHERE singleton",
+    ], { stdio: ["ignore", "ignore", "ignore"] });
+    for (const context of contexts) await context.close().catch(() => {});
   }
 });
